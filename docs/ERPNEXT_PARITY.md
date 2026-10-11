@@ -22,8 +22,8 @@ suites that prove them. See `docs/ACCEPTANCE_SCENARIOS.md` for the scenario fixt
 | Point of sale | **Partial** | Registers, shifts, idempotent mixed-tender checkout with exact COGS, bounded refunds, cash over/short close — `PosRetailPostgreSqlTests`. Offline mode, receipt PDF/printing, card-settlement reconciliation, till-approval workflow remain open. |
 | Stock / warehouse | **Partial** | Receive/transfer/sell/return, counts, reservations, quarantine, lot/expiry, moving-average valuation are the codebase's strongest area (pre-existing suites); serial-number tracking, QC holds and FIFO/lot costing are not implemented. |
 | Payment / banking | **Partial** | Pay/receive with allocations and cash/bank journals; unapplied advances, internal transfers and bank-statement reconciliation are not implemented. |
-| Purchase returns / credit notes | **Planned** | TS-08; refund-style bounded returns exist only on the POS side today. |
-| Sales returns / credit notes | **Planned** | TS-13 residual; POS refunds are the only return path implemented. |
+| Purchase returns / credit notes | **Supported** | Supplier credit notes bounded by accepted-minus-returned, stock issued back, Dr AP / Cr Inventory; invoice-matched receipt lines rejected — `CreditNotesAndStatementsPostgreSqlTests`. |
+| Sales returns / credit notes | **Supported** | Sales credit notes bounded by delivered-minus-returned with restock dispositions, Dr Sales / Cr AR plus COGS reversal — `CreditNotesAndStatementsPostgreSqlTests`. |
 | Price lists, taxes on documents | **Planned** | Tax-rule configuration and deterministic amount calculation exist; effective-dated tax journals on sales/purchase documents are not wired. |
 | Quotations, credit control | **Planned** | TS-11/TS-12 residuals; customer master with payment terms exists. |
 | CRM, portals | **Planned** | TS-16 (#308–#311). |
@@ -32,7 +32,7 @@ suites that prove them. See `docs/ACCEPTANCE_SCENARIOS.md` for the scenario fixt
 | Manufacturing / MRP / quality | **Planned** | TS-19 (#324–#330). |
 | HR, payroll | **Planned** | TS-20 (#332–#346; Frappe HR is a separate upstream app). |
 | FX, intercompany, budgets, statutory packs | **Planned** | TS-21 (#348–#353). |
-| Financial statements beyond trial balance | **Planned** | P&L, balance sheet, aging and hierarchy rollups derive from the immutable ledger but are not built. |
+| Financial statements beyond trial balance | **Partial** | P&L and balance sheet (with balance assertion and retained profit) are ledger-backed and tested; aging reports and account-hierarchy rollups remain open. |
 | Integrations / extensibility | **Partial** | Versioned REST, webhooks with durable delivery, imports/exports, forecasting exist; webhook dead-letter/signature hardening is tracked under TS-22 (#355–#361). |
 | ERPNext extensibility (DocTypes, custom fields, report builder) | **Explicitly excluded** | Business-capability parity only; no Frappe platform compatibility by owner decision (review §11). |
 | Website / e-commerce, subscriptions, helpdesk | **Explicitly excluded** | Not selected for scope. |

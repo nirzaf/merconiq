@@ -151,6 +151,12 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<PosRefund> PosRefunds { get; set; } = null!;
     public DbSet<PosRefundLine> PosRefundLines { get; set; } = null!;
 
+    /// <summary>Posted, immutable supplier and sales credit notes.</summary>
+    public DbSet<PurchaseCreditNote> PurchaseCreditNotes { get; set; } = null!;
+    public DbSet<PurchaseCreditNoteLine> PurchaseCreditNoteLines { get; set; } = null!;
+    public DbSet<SalesCreditNote> SalesCreditNotes { get; set; } = null!;
+    public DbSet<SalesCreditNoteLine> SalesCreditNoteLines { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -644,6 +650,7 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(account => account.Name).HasMaxLength(200).IsRequired();
             entity.Property(account => account.AccountType).HasMaxLength(64).IsRequired();
             entity.Property(account => account.IsActive).HasDefaultValue(true);
+            entity.Property(account => account.AccountClass).HasConversion<string>().HasMaxLength(16);
             entity.HasAlternateKey(account => new { account.Id, account.CompanyId, account.TenantId });
             entity.HasIndex(account => new { account.CompanyId, account.TenantId });
             entity.HasIndex(account => new { account.TenantId, account.CompanyId, account.AccountCode })
@@ -2243,6 +2250,117 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(line => line.PosSaleLine)
                 .WithMany()
                 .HasForeignKey(line => line.PosSaleLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PurchaseCreditNote>(entity =>
+        {
+            entity.HasQueryFilter(note => note.TenantId == CurrentTenantId);
+            entity.Property(note => note.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(note => note.CreditNoteNumber).HasMaxLength(128).IsRequired();
+            entity.Property(note => note.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(note => note.Notes).HasMaxLength(500);
+            entity.Property(note => note.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(note => note.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(note => note.PostedBy).HasMaxLength(256).IsRequired();
+            entity.Property(note => note.TotalValue).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(note => new { note.Id, note.TenantId });
+            entity.HasIndex(note => new { note.TenantId, note.CompanyId, note.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_PurchaseCreditNotes_RequestKey");
+            entity.HasIndex(note => new { note.TenantId, note.CompanyId, note.SupplierId, note.CreditNoteNumber })
+                .IsUnique()
+                .HasDatabaseName("UX_PurchaseCreditNotes_SupplierNumber");
+            entity.HasOne(note => note.Supplier)
+                .WithMany()
+                .HasForeignKey(note => note.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(note => new { note.CompanyId, note.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PurchaseCreditNoteLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.CreditValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("PurchaseCreditNoteLines", table => table.HasCheckConstraint(
+                "CK_PurchaseCreditNoteLines_Quantity",
+                "\"Quantity\" > 0 AND \"CreditValue\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.PurchaseCreditNoteId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.GoodsReceiptLineId });
+            entity.HasOne(line => line.PurchaseCreditNote)
+                .WithMany(note => note.Lines)
+                .HasForeignKey(line => new { line.PurchaseCreditNoteId, line.TenantId })
+                .HasPrincipalKey(note => new { note.Id, note.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.GoodsReceiptLine)
+                .WithMany()
+                .HasForeignKey(line => line.GoodsReceiptLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalesCreditNote>(entity =>
+        {
+            entity.HasQueryFilter(note => note.TenantId == CurrentTenantId);
+            entity.Property(note => note.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(note => note.CreditNoteNumber).HasMaxLength(128).IsRequired();
+            entity.Property(note => note.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(note => note.Notes).HasMaxLength(500);
+            entity.Property(note => note.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(note => note.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(note => note.PostedBy).HasMaxLength(256).IsRequired();
+            entity.Property(note => note.TotalValue).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(note => new { note.Id, note.TenantId });
+            entity.HasIndex(note => new { note.TenantId, note.CompanyId, note.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_SalesCreditNotes_RequestKey");
+            entity.HasIndex(note => new { note.TenantId, note.CompanyId, note.CreditNoteNumber })
+                .IsUnique()
+                .HasDatabaseName("UX_SalesCreditNotes_Number");
+            entity.HasOne(note => note.Customer)
+                .WithMany()
+                .HasForeignKey(note => note.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(note => new { note.CompanyId, note.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalesCreditNoteLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.Disposition).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(line => line.CreditValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("SalesCreditNoteLines", table => table.HasCheckConstraint(
+                "CK_SalesCreditNoteLines_Quantity",
+                "\"Quantity\" > 0 AND \"CreditValue\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.SalesCreditNoteId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.DeliveryNoteLineId });
+            entity.HasOne(line => line.SalesCreditNote)
+                .WithMany(note => note.Lines)
+                .HasForeignKey(line => new { line.SalesCreditNoteId, line.TenantId })
+                .HasPrincipalKey(note => new { note.Id, note.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.DeliveryNoteLine)
+                .WithMany()
+                .HasForeignKey(line => line.DeliveryNoteLineId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Company>()
                 .WithMany()

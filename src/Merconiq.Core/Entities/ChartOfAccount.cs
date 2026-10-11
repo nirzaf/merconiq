@@ -28,6 +28,9 @@ public sealed class ChartOfAccount : AuditableEntity
     /// <summary>Whether this account groups child accounts rather than representing a leaf.</summary>
     public bool IsGroupAccount { get; set; }
 
+    /// <summary>Statement classification; required for accounts that receive postings.</summary>
+    public AccountClass? AccountClass { get; set; }
+
     /// <summary>Whether the definition is currently active for configuration queries.</summary>
     public bool IsActive { get; set; } = true;
 
