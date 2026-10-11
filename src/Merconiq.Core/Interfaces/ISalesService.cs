@@ -36,4 +36,30 @@ public interface ISalesService
         int companyId,
         int salesOrderId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Customer aging as of a date: open receivable balances bucketed by days past due.</summary>
+    Task<AgingReport> GetReceivablesAgingAsync(
+        int companyId,
+        DateOnly? asOfDate = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Creates one open quotation; prices are snapshotted and never post.</summary>
+    Task<QuotationResult> PostQuotationAsync(
+        PostQuotationRequest request,
+        string actor,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Converts one open, unexpired quotation into a sales order bounded by the quoted lines.
+    /// Conversion is idempotent: repeated calls return the original order.
+    /// </summary>
+    Task<QuotationConversionResult> ConvertQuotationAsync(
+        ConvertQuotationRequest request,
+        string actor,
+        CancellationToken cancellationToken = default);
+
+    Task<Quotation?> GetQuotationAsync(
+        int companyId,
+        int quotationId,
+        CancellationToken cancellationToken = default);
 }

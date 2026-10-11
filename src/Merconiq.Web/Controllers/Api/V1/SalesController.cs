@@ -182,6 +182,117 @@ public sealed class SalesController(
                     .ToArray())));
     }
 
+    /// <summary>Create one quotation; idempotent per Idempotency-Key. Quotations never post.</summary>
+    [HttpPost("quotations")]
+    [Authorize(Policy = CapabilityPolicies.Post)]
+    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> PostQuotation(
+        int companyId,
+        [FromBody] PostQuotationWriteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null || companyId != request.CompanyId)
+            return BadRequest(ApiResponse<object>.CreateFailure("CompanyId must match the route."));
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.Post))
+            return Forbid();
+        var actor = RequireActor();
+        if (actor is null)
+            return Unauthorized();
+        var requestKey = RequireIdempotencyKey();
+        if (requestKey is null)
+            return BadRequest(ApiResponse<object>.CreateFailure(
+                "Idempotency-Key is required for quotation creation."));
+
+        var result = await sales.PostQuotationAsync(
+            new PostQuotationRequest(
+                companyId,
+                request.CustomerId,
+                requestKey,
+                request.Lines.Select(line => new PostQuotationLine(line.ItemId, line.Quantity, line.UnitPrice)).ToArray(),
+                request.QuotationDate,
+                request.ValidUntil,
+                request.Notes),
+            actor,
+            cancellationToken);
+        return Ok(ApiResponse<QuotationPostResponse>.CreateSuccess(new QuotationPostResponse(
+            result.QuotationId, result.QuotationNumber, result.TotalValue, result.ValidUntil, result.Replayed)));
+    }
+
+    /// <summary>
+    /// Convert one open, unexpired quotation into a sales order; repeated calls replay the
+    /// original order.
+    /// </summary>
+    [HttpPost("quotations/{quotationId:int}/conversions")]
+    [Authorize(Policy = CapabilityPolicies.Post)]
+    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> ConvertQuotation(
+        int companyId,
+        int quotationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.Post))
+            return Forbid();
+        var actor = RequireActor();
+        if (actor is null)
+            return Unauthorized();
+
+        var result = await sales.ConvertQuotationAsync(
+            new ConvertQuotationRequest(companyId, quotationId), actor, cancellationToken);
+        return Ok(ApiResponse<QuotationConversionResponse>.CreateSuccess(new QuotationConversionResponse(
+            result.QuotationId, result.SalesOrderId, result.OrderNumber, result.TotalValue, result.Replayed)));
+    }
+
+    /// <summary>Get one quotation with its lines.</summary>
+    [HttpGet("quotations/{quotationId:int}")]
+    [Authorize(Policy = CapabilityPolicies.View)]
+    public async Task<IActionResult> GetQuotation(
+        int companyId,
+        int quotationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.View))
+            return Forbid();
+
+        var quotation = await sales.GetQuotationAsync(companyId, quotationId, cancellationToken);
+        return quotation is null
+            ? NotFound(ApiResponse<object>.CreateFailure("Quotation not found in this company."))
+            : Ok(ApiResponse<QuotationResponse>.CreateSuccess(new QuotationResponse(
+                quotation.Id,
+                quotation.CompanyId,
+                quotation.CustomerId,
+                quotation.QuotationNumber,
+                quotation.Status.ToString(),
+                quotation.QuotationDate,
+                quotation.ValidUntil,
+                quotation.SalesOrderId,
+                quotation.Lines.OrderBy(line => line.LineNumber).Select(line => new QuotationLineResponse(
+                    line.Id, line.LineNumber, line.ItemId, line.Quantity, line.UnitPrice, line.NetValue)).ToArray())));
+    }
+
+    /// <summary>Customer aging as of a date: open receivable balances bucketed by days past due.</summary>
+    [HttpGet("receivables-aging")]
+    [Authorize(Policy = CapabilityPolicies.View)]
+    public async Task<IActionResult> GetReceivablesAging(
+        int companyId,
+        [FromQuery] DateOnly? asOfDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.View))
+            return Forbid();
+
+        var report = await sales.GetReceivablesAgingAsync(companyId, asOfDate, cancellationToken);
+        return Ok(ApiResponse<AgingResponse>.CreateSuccess(new AgingResponse(
+            report.CompanyId,
+            report.AsOfDate,
+            report.Kind,
+            report.Rows.Select(row => new AgingRowResponse(
+                row.PartyId, row.PartyName, row.NotDue, row.Days1To30, row.Days31To60,
+                row.Days61To90, row.Over90, row.TotalOpen)).ToArray(),
+            report.TotalOpen)));
+    }
+
     /// <summary>Get one sales order with its lines.</summary>
     [HttpGet("orders/{salesOrderId:int}")]
     [Authorize(Policy = CapabilityPolicies.View)]
@@ -331,3 +442,48 @@ public sealed record SalesOrderProgressResponse(
 
 public sealed record SalesOrderLineProgressResponse(
     int LineId, int ItemId, int OrderedQuantity, int DeliveredQuantity, int OutstandingQuantity);
+
+
+public sealed class PostQuotationWriteRequest
+{
+    public int CompanyId { get; init; }
+
+    [Range(1, int.MaxValue)]
+    public int CustomerId { get; init; }
+
+    [MinLength(1), MaxLength(200)]
+    public IReadOnlyList<QuotationLineWriteRequest> Lines { get; init; } = [];
+
+    public DateOnly? QuotationDate { get; init; }
+
+    public DateOnly? ValidUntil { get; init; }
+
+    [StringLength(500)]
+    public string? Notes { get; init; }
+}
+
+public sealed class QuotationLineWriteRequest
+{
+    [Range(1, int.MaxValue)]
+    public int ItemId { get; init; }
+
+    [Range(1, int.MaxValue)]
+    public int Quantity { get; init; }
+
+    [Range(0, double.MaxValue)]
+    public decimal UnitPrice { get; init; }
+}
+
+public sealed record QuotationPostResponse(
+    int QuotationId, string QuotationNumber, decimal TotalValue, DateOnly ValidUntil, bool Replayed);
+
+public sealed record QuotationConversionResponse(
+    int QuotationId, int SalesOrderId, string OrderNumber, decimal TotalValue, bool Replayed);
+
+public sealed record QuotationResponse(
+    int Id, int CompanyId, int CustomerId, string QuotationNumber, string Status,
+    DateOnly QuotationDate, DateOnly ValidUntil, int? SalesOrderId,
+    IReadOnlyList<QuotationLineResponse> Lines);
+
+public sealed record QuotationLineResponse(
+    int Id, int LineNumber, int ItemId, int Quantity, decimal UnitPrice, decimal NetValue);

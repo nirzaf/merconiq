@@ -323,6 +323,274 @@ public sealed class SalesService(
             order.Id, ordered, deliveredTotal, ordered - deliveredTotal, lines);
     }
 
+    /// <inheritdoc />
+    public async Task<QuotationResult> PostQuotationAsync(
+        PostQuotationRequest request,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        var requestKey = request.RequestKey?.Trim() ?? string.Empty;
+        if (request.CompanyId <= 0 || request.CustomerId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId and CustomerId are required.");
+        if (requestKey.Length is 0 or > 200)
+            throw new FinancePostingValidationException("A quotation request key of 1 to 200 characters is required.");
+        if (request.Lines is null || request.Lines.Count is 0 or > MaximumLines)
+            throw new FinancePostingValidationException($"A quotation requires between 1 and {MaximumLines} lines.");
+        foreach (var line in request.Lines)
+        {
+            if (line is null || line.ItemId <= 0 || line.Quantity <= 0 || line.UnitPrice < 0)
+                throw new FinancePostingValidationException(
+                    "Every quotation line needs a positive item id and quantity, and a non-negative price.");
+        }
+
+        var normalized = request with { RequestKey = requestKey };
+        var requestHash = ComputeHash(h =>
+        {
+            h.Append("quotation\u001f").Append(request.CompanyId).Append('\u001f').Append(request.CustomerId)
+                .Append('\u001f').Append(normalized.RequestKey).Append('\u001f')
+                .Append((request.QuotationDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)) ?? string.Empty)
+                .Append('\u001f')
+                .Append((request.ValidUntil?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)) ?? string.Empty)
+                .Append('\u001f').Append(request.Notes ?? string.Empty);
+            foreach (var line in normalized.Lines)
+            {
+                h.Append(line.ItemId).Append('\u001f').Append(line.Quantity).Append('\u001f')
+                    .Append(line.UnitPrice.ToString("0.########", CultureInfo.InvariantCulture)).Append('\u001f');
+            }
+        });
+
+        QuotationResult result = null!;
+        await unitOfWork.ExecuteInTransactionAsync(
+            async () =>
+            {
+                await unitOfWork.AcquireTenantOperationLockAsync(
+                    $"sales-quotation:{normalized.CompanyId}", cancellationToken);
+                var committed = await context.Quotations
+                    .Include(quotation => quotation.Lines)
+                    .SingleOrDefaultAsync(quotation => quotation.CompanyId == normalized.CompanyId &&
+                        quotation.RequestKey == normalized.RequestKey, cancellationToken);
+                if (committed is not null)
+                {
+                    if (committed.RequestHash != requestHash)
+                        throw new FinancePostingConflictException(
+                            "This quotation request key was already committed with a different payload.");
+                    result = new QuotationResult(committed.Id, committed.QuotationNumber,
+                        committed.Lines.Sum(line => line.NetValue), committed.ValidUntil, Replayed: true);
+                    return;
+                }
+
+                var company = await RequireCompanyAsync(normalized.CompanyId, cancellationToken);
+                var customer = await context.Customers.SingleOrDefaultAsync(
+                        candidate => candidate.Id == normalized.CustomerId && candidate.CompanyId == normalized.CompanyId,
+                        cancellationToken)
+                    ?? throw new FinancePostingValidationException("Customer not found in this company.");
+                var itemIds = normalized.Lines.Select(line => line.ItemId).Distinct().ToList();
+                var items = await context.Items
+                    .Where(item => itemIds.Contains(item.Id))
+                    .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+                var quotationDate = request.QuotationDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+                var validUntil = request.ValidUntil ?? quotationDate.AddDays(30);
+                if (validUntil < quotationDate)
+                    throw new FinancePostingValidationException("The validity end must not precede the quotation date.");
+                var scale = company.CurrencyScale ?? 2;
+
+                var quotation = new Quotation
+                {
+                    CompanyId = normalized.CompanyId,
+                    CustomerId = customer.Id,
+                    QuotationDate = quotationDate,
+                    ValidUntil = validUntil,
+                    RequestKey = normalized.RequestKey,
+                    RequestHash = requestHash,
+                    Notes = request.Notes,
+                    CreatedAtUtc = DateTime.UtcNow,
+                    CreatedBy = actor.Trim()
+                };
+                foreach (var line in normalized.Lines)
+                {
+                    if (!items.ContainsKey(line.ItemId))
+                        throw new FinancePostingValidationException($"Item {line.ItemId} does not exist.");
+                    var roundedPrice = decimal.Round(line.UnitPrice, scale, MidpointRounding.AwayFromZero);
+                    if (roundedPrice != line.UnitPrice)
+                        throw new FinancePostingValidationException(
+                            $"Unit prices must already be rounded to {scale} decimal places.");
+                    quotation.Lines.Add(new QuotationLine
+                    {
+                        CompanyId = normalized.CompanyId,
+                        LineNumber = quotation.Lines.Count + 1,
+                        ItemId = line.ItemId,
+                        Quantity = line.Quantity,
+                        UnitPrice = roundedPrice,
+                        NetValue = decimal.Round(line.Quantity * roundedPrice, scale, MidpointRounding.AwayFromZero)
+                    });
+                }
+
+                quotation.QuotationNumber = await documentNumbers.AllocateAsync(
+                    normalized.CompanyId, "Quotation", quotationDate.Year, "QT", cancellationToken);
+                context.Quotations.Add(quotation);
+                await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
+
+                logger.LogInformation("Quotation {QuotationNumber} committed for company {CompanyId}",
+                    quotation.QuotationNumber, normalized.CompanyId);
+                result = new QuotationResult(quotation.Id, quotation.QuotationNumber,
+                    quotation.Lines.Sum(line => line.NetValue), quotation.ValidUntil, Replayed: false);
+            },
+            cancellationToken: cancellationToken,
+            verifySucceeded: async () => await context.Quotations.AnyAsync(
+                quotation => quotation.CompanyId == normalized.CompanyId && quotation.RequestKey == normalized.RequestKey,
+                cancellationToken));
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<QuotationConversionResult> ConvertQuotationAsync(
+        ConvertQuotationRequest request,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        if (request.CompanyId <= 0 || request.QuotationId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId and QuotationId are required.");
+
+        QuotationConversionResult result = null!;
+        (string? Number, DateOnly ValidUntil, int Id, int CompanyId)? expiredQuotation = null;
+        await unitOfWork.ExecuteInTransactionAsync(
+            async () =>
+            {
+                await unitOfWork.AcquireTenantOperationLockAsync(
+                    $"sales-quotation:{request.CompanyId}", cancellationToken);
+                var quotation = await context.Quotations
+                    .Include(candidate => candidate.Lines)
+                    .SingleOrDefaultAsync(
+                        candidate => candidate.Id == request.QuotationId && candidate.CompanyId == request.CompanyId,
+                        cancellationToken)
+                    ?? throw new FinancePostingValidationException("Quotation not found in this company.");
+
+                if (quotation.Status == QuotationStatus.Accepted && quotation.SalesOrderId is { } existingOrderId)
+                {
+                    // Idempotent conversion: the committed order answers repeated calls.
+                    var existingOrder = await context.SalesOrders.SingleAsync(
+                        order => order.Id == existingOrderId, cancellationToken);
+                    result = new QuotationConversionResult(quotation.Id, existingOrderId,
+                        existingOrder.OrderNumber,
+                        existingOrder.Lines.Sum(line => line.NetValue), Replayed: true);
+                    return;
+                }
+                if (quotation.Status != QuotationStatus.Open)
+                    throw new FinancePostingConflictException(
+                        $"A {quotation.Status} quotation cannot be converted; create a new quotation.");
+                if (quotation.ValidUntil < DateOnly.FromDateTime(DateTime.UtcNow))
+                {
+                    // Mark the expiry and let it commit; the rejection throws after the
+                    // transaction so the status transition is not rolled back.
+                    quotation.Status = QuotationStatus.Expired;
+                    await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
+                    expiredQuotation = (quotation.QuotationNumber, quotation.ValidUntil, quotation.Id, quotation.CompanyId);
+                    return;
+                }
+
+                // The conversion request key derives from the quotation, so a concurrent double
+                // conversion replays the same committed order instead of creating a second one.
+                var orderResult = await PostSalesOrderAsync(
+                    new PostSalesOrderRequest(
+                        request.CompanyId,
+                        quotation.CustomerId,
+                        $"quotation:{quotation.Id}",
+                        quotation.Lines.OrderBy(line => line.LineNumber)
+                            .Select(line => new PostSalesOrderLine(line.ItemId, line.Quantity, line.UnitPrice))
+                            .ToArray(),
+                        DateOnly.FromDateTime(DateTime.UtcNow),
+                        $"Converted from quotation {quotation.QuotationNumber}"),
+                    actor,
+                    cancellationToken);
+
+                quotation.Status = QuotationStatus.Accepted;
+                quotation.AcceptedAtUtc = DateTime.UtcNow;
+                quotation.SalesOrderId = orderResult.SalesOrderId;
+                await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
+
+                logger.LogInformation("Quotation {QuotationNumber} converted to order {OrderNumber}",
+                    quotation.QuotationNumber, orderResult.OrderNumber);
+                result = new QuotationConversionResult(quotation.Id, orderResult.SalesOrderId,
+                    orderResult.OrderNumber, orderResult.TotalValue, Replayed: false);
+            },
+            cancellationToken: cancellationToken);
+
+        if (expiredQuotation is { } expired)
+        {
+            throw new FinancePostingValidationException(
+                $"Quotation {expired.Number} expired on {expired.ValidUntil:yyyy-MM-dd}.");
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public Task<Quotation?> GetQuotationAsync(
+        int companyId,
+        int quotationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (companyId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId is required.");
+        return context.Quotations
+            .Include(quotation => quotation.Lines.OrderBy(line => line.LineNumber))
+            .SingleOrDefaultAsync(quotation => quotation.Id == quotationId && quotation.CompanyId == companyId,
+                cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<AgingReport> GetReceivablesAgingAsync(
+        int companyId,
+        DateOnly? asOfDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (companyId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId is required.");
+        var asOf = asOfDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var invoices = await context.SalesInvoices
+            .Where(invoice => invoice.CompanyId == companyId)
+            .ToListAsync(cancellationToken);
+        var paidByInvoice = await context.PaymentAllocations
+            .Where(allocation => allocation.CompanyId == companyId)
+            .GroupBy(allocation => allocation.SalesInvoiceId)
+            .Select(group => new { SalesInvoiceId = group.Key, Paid = group.Sum(allocation => allocation.Amount) })
+            .ToDictionaryAsync(row => row.SalesInvoiceId, row => row.Paid, cancellationToken);
+        var customerNames = await context.Customers
+            .Where(customer => customer.CompanyId == companyId)
+            .ToDictionaryAsync(customer => customer.Id, customer => customer.Name, cancellationToken);
+
+        var open = invoices
+            .Select(invoice => new
+            {
+                invoice.CustomerId,
+                Open = invoice.TotalValue - paidByInvoice.GetValueOrDefault(invoice.Id),
+                DaysPastDue = (asOf.DayNumber - invoice.DueDate.DayNumber)
+            })
+            .Where(row => row.Open > 0)
+            .ToList();
+        var rows = open
+            .GroupBy(row => row.CustomerId)
+            .Select(group => new AgingBucketRow(
+                group.Key,
+                customerNames.GetValueOrDefault(group.Key, $"Customer {group.Key}"),
+                group.Sum(row => row.DaysPastDue <= 0 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue is > 0 and <= 30 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue is > 30 and <= 60 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue is > 60 and <= 90 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue > 90 ? row.Open : 0m),
+                group.Sum(row => row.Open)))
+            .OrderBy(row => row.TotalOpen)
+            .ToList();
+        return new AgingReport(companyId, asOf, "Receivables", rows, rows.Sum(row => row.TotalOpen));
+    }
+
     private async Task<DeliveryResult> DeliverCoreAsync(
         PostDeliveryRequest request,
         string requestHash,

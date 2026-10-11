@@ -30,4 +30,10 @@ public interface IPurchaseInvoiceService
         int companyId,
         int? supplierId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Supplier aging as of a date: open balances bucketed by days past due.</summary>
+    Task<AgingReport> GetPayablesAgingAsync(
+        int companyId,
+        DateOnly? asOfDate = null,
+        CancellationToken cancellationToken = default);
 }

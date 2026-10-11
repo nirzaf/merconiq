@@ -142,6 +142,10 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SalesInvoice> SalesInvoices { get; set; } = null!;
     public DbSet<SalesInvoiceLine> SalesInvoiceLines { get; set; } = null!;
 
+    /// <summary>Company quotations and their snapshotted lines.</summary>
+    public DbSet<Quotation> Quotations { get; set; } = null!;
+    public DbSet<QuotationLine> QuotationLines { get; set; } = null!;
+
     /// <summary>Point-of-sale registers, shifts, checkouts and refunds.</summary>
     public DbSet<PosRegister> PosRegisters { get; set; } = null!;
     public DbSet<PosShift> PosShifts { get; set; } = null!;
@@ -2361,6 +2365,55 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(line => line.DeliveryNoteLine)
                 .WithMany()
                 .HasForeignKey(line => line.DeliveryNoteLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Quotation>(entity =>
+        {
+            entity.HasQueryFilter(quotation => quotation.TenantId == CurrentTenantId);
+            entity.Property(quotation => quotation.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(quotation => quotation.QuotationNumber).HasMaxLength(50).IsRequired();
+            entity.Property(quotation => quotation.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(quotation => quotation.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(quotation => quotation.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(quotation => quotation.Notes).HasMaxLength(500);
+            entity.Property(quotation => quotation.CreatedBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(quotation => new { quotation.Id, quotation.TenantId });
+            entity.HasIndex(quotation => new { quotation.TenantId, quotation.CompanyId, quotation.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_Quotations_RequestKey");
+            entity.HasIndex(quotation => new { quotation.TenantId, quotation.CompanyId, quotation.QuotationNumber })
+                .IsUnique();
+            entity.HasOne(quotation => quotation.Customer)
+                .WithMany()
+                .HasForeignKey(quotation => quotation.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(quotation => new { quotation.CompanyId, quotation.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<QuotationLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.UnitPrice).HasColumnType("decimal(18,6)");
+            entity.Property(line => line.NetValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("QuotationLines", table => table.HasCheckConstraint(
+                "CK_QuotationLines_Values",
+                "\"Quantity\" > 0 AND \"UnitPrice\" >= 0 AND \"NetValue\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.QuotationId, line.LineNumber }).IsUnique();
+            entity.HasOne(line => line.Quotation)
+                .WithMany(quotation => quotation.Lines)
+                .HasForeignKey(line => new { line.QuotationId, line.TenantId })
+                .HasPrincipalKey(quotation => new { quotation.Id, quotation.TenantId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Company>()
                 .WithMany()

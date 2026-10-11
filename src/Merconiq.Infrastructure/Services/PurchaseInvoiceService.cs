@@ -143,6 +143,52 @@ public sealed class PurchaseInvoiceService(
         return new PayablesOpenSummary(companyId, null, items, items.Sum(item => item.OpenValue));
     }
 
+    /// <inheritdoc />
+    public async Task<AgingReport> GetPayablesAgingAsync(
+        int companyId,
+        DateOnly? asOfDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (companyId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId is required.");
+        var asOf = asOfDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var invoices = await context.PurchaseInvoices
+            .Where(invoice => invoice.CompanyId == companyId)
+            .ToListAsync(cancellationToken);
+        var paidByInvoice = await context.PaymentAllocations
+            .Where(allocation => allocation.CompanyId == companyId)
+            .GroupBy(allocation => allocation.PurchaseInvoiceId)
+            .Select(group => new { PurchaseInvoiceId = group.Key, Paid = group.Sum(allocation => allocation.Amount) })
+            .ToDictionaryAsync(row => row.PurchaseInvoiceId, row => row.Paid, cancellationToken);
+        var supplierNames = await context.Suppliers
+            .ToDictionaryAsync(supplier => supplier.Id, supplier => supplier.Name, cancellationToken);
+
+        var open = invoices
+            .Select(invoice => new
+            {
+                invoice.SupplierId,
+                Open = invoice.TotalValue - paidByInvoice.GetValueOrDefault(invoice.Id),
+                DaysPastDue = (asOf.DayNumber - invoice.DueDate.DayNumber)
+            })
+            .Where(row => row.Open > 0)
+            .ToList();
+        var rows = open
+            .GroupBy(row => row.SupplierId)
+            .Select(group => new AgingBucketRow(
+                group.Key,
+                supplierNames.GetValueOrDefault(group.Key, $"Supplier {group.Key}"),
+                group.Sum(row => row.DaysPastDue <= 0 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue is > 0 and <= 30 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue is > 30 and <= 60 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue is > 60 and <= 90 ? row.Open : 0m),
+                group.Sum(row => row.DaysPastDue > 90 ? row.Open : 0m),
+                group.Sum(row => row.Open)))
+            .OrderBy(row => row.TotalOpen)
+            .ToList();
+        return new AgingReport(companyId, asOf, "Payables", rows, rows.Sum(row => row.TotalOpen));
+    }
+
     private async Task<PurchaseInvoiceResult> PostCoreAsync(
         PostPurchaseInvoiceRequest request,
         string requestHash,

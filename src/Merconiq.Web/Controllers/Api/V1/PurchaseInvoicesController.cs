@@ -94,6 +94,28 @@ public sealed class PurchaseInvoicesController(
             summary.TotalOpenValue)));
     }
 
+    /// <summary>Supplier aging as of a date: open balances bucketed by days past due.</summary>
+    [HttpGet("payables-aging")]
+    [Authorize(Policy = CapabilityPolicies.View)]
+    public async Task<IActionResult> GetPayablesAging(
+        int companyId,
+        [FromQuery] DateOnly? asOfDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.View))
+            return Forbid();
+
+        var report = await purchaseInvoices.GetPayablesAgingAsync(companyId, asOfDate, cancellationToken);
+        return Ok(ApiResponse<AgingResponse>.CreateSuccess(new AgingResponse(
+            report.CompanyId,
+            report.AsOfDate,
+            report.Kind,
+            report.Rows.Select(row => new AgingRowResponse(
+                row.PartyId, row.PartyName, row.NotDue, row.Days1To30, row.Days31To60,
+                row.Days61To90, row.Over90, row.TotalOpen)).ToArray(),
+            report.TotalOpen)));
+    }
+
     /// <summary>
     /// Post one supplier invoice matched to posted receipt lines. Requires an Idempotency-Key
     /// header; committed requests replay, conflicting payloads are rejected. The matched GRNI
@@ -249,3 +271,22 @@ public sealed record PayableOpenItemResponse(
     decimal TotalValue,
     decimal PaidValue,
     decimal OpenValue);
+
+/// <summary>Aging report response.</summary>
+public sealed record AgingResponse(
+    int CompanyId,
+    DateOnly AsOfDate,
+    string Kind,
+    IReadOnlyList<AgingRowResponse> Rows,
+    decimal TotalOpen);
+
+/// <summary>One party's aging buckets.</summary>
+public sealed record AgingRowResponse(
+    int PartyId,
+    string PartyName,
+    decimal NotDue,
+    decimal Days1To30,
+    decimal Days31To60,
+    decimal Days61To90,
+    decimal Over90,
+    decimal TotalOpen);

@@ -86,3 +86,35 @@ public sealed record SalesOrderLineProgress(
     int OrderedQuantity,
     int DeliveredQuantity,
     int OutstandingQuantity);
+
+/// <summary>One quoted line.</summary>
+public sealed record PostQuotationLine(int ItemId, int Quantity, decimal UnitPrice);
+
+/// <summary>Creates one quotation; idempotent per request key.</summary>
+public sealed record PostQuotationRequest(
+    int CompanyId,
+    int CustomerId,
+    string RequestKey,
+    IReadOnlyList<PostQuotationLine> Lines,
+    DateOnly? QuotationDate = null,
+    DateOnly? ValidUntil = null,
+    string? Notes = null);
+
+/// <summary>The committed-or-replayed quotation outcome.</summary>
+public sealed record QuotationResult(
+    int QuotationId,
+    string QuotationNumber,
+    decimal TotalValue,
+    DateOnly ValidUntil,
+    bool Replayed);
+
+/// <summary>Converts one quotation; the conversion is idempotent on the quotation itself.</summary>
+public sealed record ConvertQuotationRequest(int CompanyId, int QuotationId);
+
+/// <summary>The conversion outcome.</summary>
+public sealed record QuotationConversionResult(
+    int QuotationId,
+    int SalesOrderId,
+    string OrderNumber,
+    decimal TotalValue,
+    bool Replayed);
