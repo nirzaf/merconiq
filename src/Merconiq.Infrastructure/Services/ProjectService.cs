@@ -215,15 +215,25 @@ public sealed class ProjectService(
                 cancellationToken);
 
         var billable = approved.Where(entry => entry.Billable).ToList();
+        var entryIds = billable.Select(entry => entry.Id).ToList();
+        var billedByEntry = await context.SalesInvoiceLines
+            .Where(line => line.CompanyId == companyId && line.TimesheetEntryId != null &&
+                entryIds.Contains(line.TimesheetEntryId.Value))
+            .ToDictionaryAsync(line => line.TimesheetEntryId!.Value, line => line.RevenueValue, cancellationToken);
+        var billableValue = billable.Sum(entry =>
+            decimal.Round(entry.Hours * entry.HourlyRate, 2, MidpointRounding.AwayFromZero));
+        var invoicedValue = billable.Sum(entry => billedByEntry.GetValueOrDefault(entry.Id));
         return new ProjectProfitability(
             project.Id,
             project.Code,
             approved.Sum(entry => entry.Hours),
             billable.Sum(entry => entry.Hours),
             approved.Where(entry => !entry.Billable).Sum(entry => entry.Hours),
-            billable.Sum(entry => decimal.Round(entry.Hours * entry.HourlyRate, 2, MidpointRounding.AwayFromZero)),
+            billableValue,
             approved.Count,
-            rejectedCount);
+            rejectedCount,
+            invoicedValue,
+            billableValue - invoicedValue);
     }
 
     private Task<TimesheetEntry> FindEntryAsync(

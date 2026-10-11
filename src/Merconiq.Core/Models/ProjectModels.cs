@@ -32,4 +32,8 @@ public sealed record ProjectProfitability(
     decimal NonBillableHours,
     decimal BillableValue,
     int ApprovedEntries,
-    int RejectedEntries);
+    int RejectedEntries,
+    /// <summary>Billed value of approved billable time already matched by sales invoices.</summary>
+    decimal InvoicedValue,
+    /// <summary>Billable value approved but not yet invoiced.</summary>
+    decimal UninvoicedBillableValue);

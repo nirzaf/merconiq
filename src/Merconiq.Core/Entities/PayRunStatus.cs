@@ -4,5 +4,6 @@ namespace Merconiq.Core.Entities;
 public enum PayRunStatus
 {
     Draft = 0,
-    Posted = 1
+    Posted = 1,
+    Reversed = 2
 }

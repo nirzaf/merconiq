@@ -29,3 +29,13 @@ public sealed record LeaveBalance(
     decimal ApprovedSickDays,
     decimal ApprovedUnpaidDays,
     int PendingRequests);
+
+
+/// <summary>Employee self-service view of one's own record.</summary>
+public sealed record EmployeeSelfView(
+    int EmployeeId,
+    string Code,
+    string FullName,
+    string? Department,
+    bool IsActive);
+

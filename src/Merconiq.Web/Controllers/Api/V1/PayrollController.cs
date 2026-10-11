@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Merconiq.Core.Entities;
 using Merconiq.Core.Interfaces;
@@ -85,6 +86,40 @@ public sealed class PayrollController(
         return Ok(ApiResponse<PayRunResponse>.CreateSuccess(ToResponse(run)));
     }
 
+    /// <summary>Reconcile one posted run: declared totals versus its posted journal lines.</summary>
+    [HttpGet("pay-runs/{payRunId:int}/settlement")]
+    [Authorize(Policy = CapabilityPolicies.View)]
+    public async Task<IActionResult> GetSettlement(
+        int companyId, int payRunId, CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.View))
+            return Forbid();
+
+        var report = await payroll.GetSettlementReportAsync(companyId, payRunId, cancellationToken);
+        return Ok(ApiResponse<PayRunSettlementReport>.CreateSuccess(report));
+    }
+
+    /// <summary>Controlled correction: reverse one posted run with a mandatory reason.</summary>
+    [HttpPost("pay-runs/{payRunId:int}/reversal")]
+    [Authorize(Policy = CapabilityPolicies.Administer)]
+    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> ReversePayRun(
+        int companyId,
+        int payRunId,
+        [FromBody] PayRunReversalRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.Administer))
+            return Forbid();
+        var actor = RequireActor();
+        if (actor is null || request is null)
+            return Unauthorized();
+
+        var run = await payroll.ReversePayRunAsync(companyId, payRunId, request.Reason, actor, cancellationToken);
+        return Ok(ApiResponse<PayRunResponse>.CreateSuccess(ToResponse(run)));
+    }
+
     /// <summary>Get one pay run with its payslips.</summary>
     [HttpGet("pay-runs/{payRunId:int}")]
     [Authorize(Policy = CapabilityPolicies.View)]
@@ -131,3 +166,9 @@ public sealed record PayRunResponse(
 public sealed record PayslipResponse(
     int Id, int EmployeeId, decimal BaseSalary, decimal Allowances,
     decimal Deductions, decimal Gross, decimal Net, string? Notes);
+
+public sealed class PayRunReversalRequest
+{
+    [Required, StringLength(500)]
+    public string Reason { get; init; } = string.Empty;
+}

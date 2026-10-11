@@ -49,6 +49,9 @@ public sealed record DeliveryResult(
 /// <summary>One invoiced delivery line.</summary>
 public sealed record PostSalesInvoiceLine(int DeliveryNoteLineId);
 
+/// <summary>One billed approved-timesheet line (service billing).</summary>
+public sealed record PostSalesInvoiceTimeLine(int TimesheetEntryId);
+
 /// <summary>Posts one sales invoice matched to delivered lines; recognizes AR and revenue once.</summary>
 public sealed record PostSalesInvoiceRequest(
     int CompanyId,
@@ -61,7 +64,9 @@ public sealed record PostSalesInvoiceRequest(
     DateOnly? PostingDate = null,
     string? Notes = null,
     bool OverrideCreditLimit = false,
-    string? CreditOverrideReason = null);
+    string? CreditOverrideReason = null,
+    /// <summary>Approved, billable, not-yet-billed timesheet entries to bill as service lines.</summary>
+    IReadOnlyList<PostSalesInvoiceTimeLine> TimeLines = null!);
 
 /// <summary>The committed-or-replayed sales-invoice outcome.</summary>
 public sealed record SalesInvoiceResult(

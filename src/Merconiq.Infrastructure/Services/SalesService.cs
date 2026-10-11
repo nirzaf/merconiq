@@ -227,6 +227,10 @@ public sealed class SalesService(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
         ValidateInvoiceRequest(request);
+        var timeLines = request.TimeLines ?? [];
+        if (timeLines.Count > 0 && request.Lines.Count > 0)
+            throw new FinancePostingValidationException(
+                "An invoice bills either delivery lines or project time, not both.");
         var normalized = request with
         {
             InvoiceNumber = request.InvoiceNumber.Trim(),
@@ -245,6 +249,10 @@ public sealed class SalesService(
             foreach (var line in request.Lines)
             {
                 h.Append(line.DeliveryNoteLineId).Append('\u001f');
+            }
+            foreach (var line in timeLines)
+            {
+                h.Append(line.TimesheetEntryId).Append('\u001f');
             }
         });
 
@@ -770,6 +778,7 @@ public sealed class SalesService(
                 candidate => candidate.Id == request.CustomerId && candidate.CompanyId == request.CompanyId,
                 cancellationToken)
             ?? throw new FinancePostingValidationException("Customer not found in this company.");
+        var timeLines = request.TimeLines ?? [];
 
         var duplicate = await context.SalesInvoices.AnyAsync(
             invoice => invoice.CompanyId == request.CompanyId && invoice.InvoiceNumber == request.InvoiceNumber,
@@ -778,30 +787,66 @@ public sealed class SalesService(
             throw new FinancePostingConflictException(
                 $"A sales invoice numbered '{request.InvoiceNumber}' already exists in this company.");
 
+        if (IsTimeBilling(timeLines))
+        {
+            await AssertTimeEntriesUnbilledAsync(
+                request.CompanyId,
+                timeLines.Select(line => line.TimesheetEntryId).ToList(),
+                cancellationToken);
+        }
+
         var postingDate = request.PostingDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         await fiscalCalendar.EnsurePeriodOpenForDateAsync(request.CompanyId, postingDate, cancellationToken);
 
-        var deliveryLineIds = request.Lines.Select(line => line.DeliveryNoteLineId).Distinct().ToList();
-        var deliveryLines = await context.DeliveryNoteLines
-            .Where(line => line.CompanyId == request.CompanyId && deliveryLineIds.Contains(line.Id))
-            .Include(line => line.SalesOrderLine)
-            .ToDictionaryAsync(line => line.Id, cancellationToken);
-        foreach (var deliveryLineId in deliveryLineIds)
+        var isTimeBilling = IsTimeBilling(timeLines);
+        IReadOnlyDictionary<int, DeliveryNoteLine> deliveryLines = new Dictionary<int, DeliveryNoteLine>();
+        IReadOnlyDictionary<int, TimesheetEntry> timeEntries = new Dictionary<int, TimesheetEntry>();
+        if (isTimeBilling)
         {
-            if (!deliveryLines.ContainsKey(deliveryLineId))
-                throw new FinancePostingValidationException(
-                    $"Delivery line {deliveryLineId} does not exist in this company; " +
-                    "invoices match posted deliveries only.");
+            // Service billing: approved, billable, not-yet-billed timesheet entries of this company.
+            var entryIds = timeLines.Select(line => line.TimesheetEntryId).Distinct().ToList();
+            timeEntries = await context.TimesheetEntries
+                .Where(entry => entry.CompanyId == request.CompanyId && entryIds.Contains(entry.Id))
+                .Include(entry => entry.Project)
+                .ToDictionaryAsync(entry => entry.Id, cancellationToken);
+            foreach (var entryId in entryIds)
+            {
+                if (!timeEntries.ContainsKey(entryId))
+                    throw new FinancePostingValidationException(
+                        $"Timesheet entry {entryId} does not exist in this company.");
+                var entry = timeEntries[entryId];
+                if (entry.Status != TimesheetEntryStatus.Approved || !entry.Billable)
+                    throw new FinancePostingValidationException(
+                        $"Timesheet entry {entryId} must be approved and billable to invoice.");
+                if (entry.Project.CustomerId is { } projectCustomer && projectCustomer != request.CustomerId)
+                    throw new FinancePostingValidationException(
+                        $"Timesheet entry {entryId} belongs to a project of another customer.");
+            }
         }
+        else
+        {
+            var deliveryLineIds = request.Lines.Select(line => line.DeliveryNoteLineId).Distinct().ToList();
+            deliveryLines = await context.DeliveryNoteLines
+                .Where(line => line.CompanyId == request.CompanyId && deliveryLineIds.Contains(line.Id))
+                .Include(line => line.SalesOrderLine)
+                .ToDictionaryAsync(line => line.Id, cancellationToken);
+            foreach (var deliveryLineId in deliveryLineIds)
+            {
+                if (!deliveryLines.ContainsKey(deliveryLineId))
+                    throw new FinancePostingValidationException(
+                        $"Delivery line {deliveryLineId} does not exist in this company; " +
+                        "invoices match posted deliveries only.");
+            }
 
-        var alreadyInvoiced = await context.SalesInvoiceLines
-            .Where(line => deliveryLineIds.Contains(line.DeliveryNoteLineId))
-            .Select(line => line.DeliveryNoteLineId)
-            .ToListAsync(cancellationToken);
-        if (alreadyInvoiced.Count > 0)
-            throw new FinancePostingConflictException(
-                $"Delivery lines {string.Join(", ", alreadyInvoiced.OrderBy(id => id))} " +
-                "are already matched by a posted invoice; credit notes correct billed deliveries.");
+            var alreadyInvoiced = await context.SalesInvoiceLines
+                .Where(line => deliveryLineIds.Contains(line.DeliveryNoteLineId!.Value))
+                .Select(line => line.DeliveryNoteLineId!.Value)
+                .ToListAsync(cancellationToken);
+            if (alreadyInvoiced.Count > 0)
+                throw new FinancePostingConflictException(
+                    $"Delivery lines {string.Join(", ", alreadyInvoiced.OrderBy(id => id))} " +
+                    "are already matched by a posted invoice; credit notes correct billed deliveries.");
+        }
 
         var invoice = new SalesInvoice
         {
@@ -816,23 +861,38 @@ public sealed class SalesService(
             RequestHash = requestHash,
             PostedAtUtc = DateTime.UtcNow,
             PostedBy = actor.Trim(),
-            Lines = request.Lines
-                .Select((line, index) =>
+            Lines = isTimeBilling
+                ? timeLines.Select((line, index) =>
                 {
-                    var deliveryLine = deliveryLines[line.DeliveryNoteLineId];
-                    // Quantities are whole units and the approved price is already at the order
-                    // scale, so the product is exact — no rounding, no drift.
+                    var entry = timeEntries[line.TimesheetEntryId];
+                    // Hours carry at most 2 decimals and the rate 6, so the product is exact at 6.
                     return new SalesInvoiceLine
                     {
                         CompanyId = request.CompanyId,
                         LineNumber = index + 1,
-                        DeliveryNoteLineId = deliveryLine.Id,
-                        ItemId = deliveryLine.ItemId,
-                        Quantity = deliveryLine.Quantity,
-                        RevenueValue = deliveryLine.Quantity * deliveryLine.SalesOrderLine.UnitPrice
+                        DeliveryNoteLineId = null,
+                        TimesheetEntryId = entry.Id,
+                        Quantity = 1,
+                        RevenueValue = decimal.Round(entry.Hours * entry.HourlyRate, 6, MidpointRounding.AwayFromZero)
                     };
-                })
-                .ToList()
+                }).ToList()
+                : request.Lines
+                    .Select((line, index) =>
+                    {
+                        var deliveryLine = deliveryLines[line.DeliveryNoteLineId];
+                        // Quantities are whole units and the approved price is already at the order
+                        // scale, so the product is exact — no rounding, no drift.
+                        return new SalesInvoiceLine
+                        {
+                            CompanyId = request.CompanyId,
+                            LineNumber = index + 1,
+                            DeliveryNoteLineId = deliveryLine.Id,
+                            ItemId = deliveryLine.ItemId,
+                            Quantity = deliveryLine.Quantity,
+                            RevenueValue = deliveryLine.Quantity * deliveryLine.SalesOrderLine.UnitPrice
+                        };
+                    })
+                    .ToList()
         };
         invoice.TotalValue = invoice.Lines.Sum(line => line.RevenueValue);
         await EnforceCreditLimitAsync(request, customer, invoice, actor, cancellationToken);
@@ -983,13 +1043,47 @@ public sealed class SalesService(
         var requestKey = request.RequestKey?.Trim() ?? string.Empty;
         if (requestKey.Length is 0 or > 200)
             throw new FinancePostingValidationException("A sales-invoice request key of 1 to 200 characters is required.");
-        if (request.Lines is null || request.Lines.Count is 0 or > MaximumLines)
+        int effectiveLines = request.Lines is null && request.TimeLines is null
+            ? 0
+            : (request.Lines?.Count ?? 0) + (request.TimeLines?.Count ?? 0);
+        if (effectiveLines is 0 or > MaximumLines)
             throw new FinancePostingValidationException($"A sales invoice requires between 1 and {MaximumLines} lines.");
-        foreach (var line in request.Lines)
+        foreach (var line in request.Lines ?? [])
         {
             if (line is null || line.DeliveryNoteLineId <= 0)
                 throw new FinancePostingValidationException("Every invoice line needs a positive DeliveryNoteLineId.");
         }
+        if ((request.Lines?.Count ?? 0) > 0 && (request.TimeLines?.Count ?? 0) > 0)
+            throw new FinancePostingValidationException(
+                "An invoice bills either delivery lines or project time, not both.");
+        foreach (var line in request.TimeLines ?? [])
+        {
+            if (line is null || line.TimesheetEntryId <= 0)
+                throw new FinancePostingValidationException("Every time line needs a positive TimesheetEntryId.");
+        }
+    }
+
+    private static bool IsTimeBilling(IReadOnlyList<PostSalesInvoiceTimeLine> timeLines) =>
+        timeLines.Count > 0;
+
+    /// <summary>
+    /// Rechecks, inside the transaction, that no requested time entry is already billed; the
+    /// database's filtered unique index is the final guard under concurrency.
+    /// </summary>
+    private async Task AssertTimeEntriesUnbilledAsync(
+        int companyId,
+        IReadOnlyCollection<int> entryIds,
+        CancellationToken cancellationToken)
+    {
+        var billed = await context.SalesInvoiceLines
+            .Where(line => line.CompanyId == companyId && line.TimesheetEntryId != null &&
+                entryIds.Contains(line.TimesheetEntryId.Value))
+            .Select(line => line.TimesheetEntryId!.Value)
+            .ToListAsync(cancellationToken);
+        if (billed.Count > 0)
+            throw new FinancePostingConflictException(
+                $"Timesheet entries {string.Join(", ", billed.OrderBy(id => id))} are already billed; " +
+                "credit notes correct billed time.");
     }
 
     private static string ComputeHash(Action<StringBuilder> build)

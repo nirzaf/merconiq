@@ -130,6 +130,45 @@ public sealed class HumanResourcesController(
         return Ok(ApiResponse<LeaveResponse>.CreateSuccess(ToResponse(leave)));
     }
 
+    /// <summary>Resolve the caller's own employee record through its user link.</summary>
+    [HttpGet("me")]
+    [Authorize(Policy = CapabilityPolicies.View)]
+    public async Task<IActionResult> GetMyProfile(int companyId, CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.View))
+            return Forbid();
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userId))
+            return Unauthorized();
+
+        var profile = await hr.GetMyProfileAsync(companyId, userId, cancellationToken);
+        return profile is null
+            ? NotFound(ApiResponse<object>.CreateFailure("No employee record is linked to this account."))
+            : Ok(ApiResponse<EmployeeSelfView>.CreateSuccess(profile));
+    }
+
+    /// <summary>Safe offboarding: deactivates the employee after open-balance checks.</summary>
+    [HttpPost("employees/{employeeId:int}/offboarding")]
+    [Authorize(Policy = CapabilityPolicies.Administer)]
+    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> Offboard(
+        int companyId,
+        int employeeId,
+        [FromBody] OffboardingRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.Administer))
+            return Forbid();
+        var actor = RequireActor();
+        if (actor is null || request is null)
+            return Unauthorized();
+
+        var employee = await hr.DeactivateEmployeeAsync(
+            companyId, employeeId, request.Reason, actor, cancellationToken);
+        return Ok(ApiResponse<EmployeeResponse>.CreateSuccess(ToResponse(employee)));
+    }
+
     /// <summary>Approved leave days per type for one employee and year.</summary>
     [HttpGet("employees/{employeeId:int}/leave-balance")]
     [Authorize(Policy = CapabilityPolicies.View)]
@@ -202,3 +241,9 @@ public sealed record AttendanceResponse(
 public sealed record LeaveResponse(
     int Id, int EmployeeId, string LeaveType, DateOnly StartDate, DateOnly EndDate,
     decimal Days, string Status, string? DecidedBy, string? DecisionReason);
+
+public sealed class OffboardingRequest
+{
+    [Required, StringLength(500)]
+    public string Reason { get; init; } = string.Empty;
+}

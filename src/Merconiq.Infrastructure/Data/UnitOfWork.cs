@@ -21,7 +21,10 @@ public class UnitOfWork : IUnitOfWork
         _context = context;
     }
 
-    public bool HasActiveTransaction => _currentTransaction is not null || _executionStrategyTransactionActive;
+    public bool HasActiveTransaction =>
+        _currentTransaction is not null ||
+        _executionStrategyTransactionActive ||
+        _context.Database.CurrentTransaction is not null;
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

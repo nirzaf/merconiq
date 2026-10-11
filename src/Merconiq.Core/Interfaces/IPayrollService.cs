@@ -22,4 +22,15 @@ public interface IPayrollService
         CancellationToken cancellationToken = default);
 
     Task<PayRun?> GetPayRunAsync(int companyId, int payRunId, CancellationToken cancellationToken = default);
+
+    /// <summary>Reconciles one posted run's declared totals against its posted journal lines.</summary>
+    Task<PayRunSettlementReport> GetSettlementReportAsync(
+        int companyId, int payRunId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Controlled correction: posts one reversing journal (Dr bank + deductions payable /
+    /// Cr salary expense) and marks the run Reversed with a mandatory reason.
+    /// </summary>
+    Task<PayRun> ReversePayRunAsync(
+        int companyId, int payRunId, string reason, string actor, CancellationToken cancellationToken = default);
 }

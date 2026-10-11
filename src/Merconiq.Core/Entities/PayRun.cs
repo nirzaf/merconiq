@@ -33,5 +33,11 @@ public sealed class PayRun : AuditableEntity
 
     public string PostedBy { get; set; } = string.Empty;
 
+    public string? ReversalReason { get; set; }
+
+    public DateTime? ReversedAtUtc { get; set; }
+
+    public string? ReversedBy { get; set; }
+
     public ICollection<Payslip> Payslips { get; set; } = new List<Payslip>();
 }

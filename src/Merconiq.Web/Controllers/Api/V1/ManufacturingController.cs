@@ -114,6 +114,19 @@ public sealed class ManufacturingController(
         return Ok(ApiResponse<WorkOrderResponse>.CreateSuccess(ToResponse(workOrder)));
     }
 
+    /// <summary>Advisory material availability proposal for one work order; commits nothing.</summary>
+    [HttpGet("work-orders/{workOrderId:int}/material-proposal")]
+    [Authorize(Policy = CapabilityPolicies.View)]
+    public async Task<IActionResult> MaterialProposal(
+        int companyId, int workOrderId, CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.View))
+            return Forbid();
+
+        var proposal = await manufacturing.GetMaterialProposalAsync(companyId, workOrderId, cancellationToken);
+        return Ok(ApiResponse<MaterialProposal>.CreateSuccess(proposal));
+    }
+
     /// <summary>Get one work order with its consumption snapshot.</summary>
     [HttpGet("work-orders/{workOrderId:int}")]
     [Authorize(Policy = CapabilityPolicies.View)]

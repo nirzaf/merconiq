@@ -30,4 +30,8 @@ public interface IManufacturingService
 
     Task<WorkOrder?> GetWorkOrderAsync(
         int companyId, int workOrderId, CancellationToken cancellationToken = default);
+
+    /// <summary>Advisory material availability proposal for one work order; commits nothing.</summary>
+    Task<MaterialProposal> GetMaterialProposalAsync(
+        int companyId, int workOrderId, CancellationToken cancellationToken = default);
 }

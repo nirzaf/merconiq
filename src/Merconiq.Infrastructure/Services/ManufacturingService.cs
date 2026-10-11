@@ -339,6 +339,63 @@ public sealed class ManufacturingService(
     }
 
     /// <inheritdoc />
+    public async Task<MaterialProposal> GetMaterialProposalAsync(
+        int companyId, int workOrderId, CancellationToken cancellationToken = default)
+    {
+        if (companyId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId is required.");
+        var workOrder = await context.WorkOrders
+            .SingleOrDefaultAsync(
+                candidate => candidate.Id == workOrderId && candidate.CompanyId == companyId,
+                cancellationToken)
+            ?? throw new FinancePostingValidationException("Work order not found in this company.");
+
+        var bom = await context.BillOfMaterials
+            .Include(candidate => candidate.Lines)
+            .SingleAsync(candidate => candidate.Id == workOrder.BillOfMaterialsId, cancellationToken);
+        var componentIds = bom.Lines.Select(line => line.ComponentItemId).ToList();
+        var stock = await context.StockInHand
+            .Where(position => position.TenantId == context.CurrentTenantId &&
+                position.LocationId == workOrder.LocationId &&
+                componentIds.Contains(position.ItemId))
+            .GroupBy(position => position.ItemId)
+            .Select(group => new
+            {
+                ItemId = group.Key,
+                OnHand = group.Sum(position => (decimal)position.Quantity),
+                Reserved = group.Sum(position => (decimal)position.ReservedQuantity),
+                Quarantined = group.Sum(position => (decimal)position.QuarantinedQuantity)
+            })
+            .ToDictionaryAsync(row => row.ItemId, cancellationToken);
+
+        var lines = bom.Lines.OrderBy(line => line.LineNumber)
+            .Select(line =>
+            {
+                var required = line.QuantityPerUnit * workOrder.Quantity;
+                stock.TryGetValue(line.ComponentItemId, out var position);
+                var onHand = position?.OnHand ?? 0m;
+                var reserved = position?.Reserved ?? 0m;
+                var available = onHand - reserved;
+                var shortage = required > available ? required - available : 0m;
+                return new MaterialProposalLine(
+                    line.ComponentItemId,
+                    required,
+                    onHand,
+                    reserved,
+                    available,
+                    shortage,
+                    shortage == 0m ? "Proceed" : "Shortage");
+            })
+            .ToList();
+        return new MaterialProposal(
+            workOrder.Id,
+            workOrder.WorkOrderNumber,
+            workOrder.Quantity,
+            lines.All(line => line.ShortageQuantity == 0m),
+            lines);
+    }
+
+    /// <inheritdoc />
     public Task<WorkOrder?> GetWorkOrderAsync(
         int companyId, int workOrderId, CancellationToken cancellationToken = default)
     {

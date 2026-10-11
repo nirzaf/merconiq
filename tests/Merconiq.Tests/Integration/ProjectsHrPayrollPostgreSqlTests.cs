@@ -9,6 +9,8 @@ using Merconiq.Infrastructure.Services;
 using Merconiq.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Merconiq.Infrastructure.Repositories;
 using Xunit;
 
 namespace Merconiq.Tests.Integration;
@@ -183,6 +185,158 @@ public sealed class ProjectsHrPayrollPostgreSqlTests
         (await verify.Payslips.SumAsync(slip => slip.Gross)).Should().Be(4600m);
     }
 
+    [PostgreSqlFact]
+    public async Task Timesheet_BillingThroughSalesInvoice_BillsApprovedTime_ReplaySafe()
+    {
+        var tenantId = $"bil-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        int taskId;
+        var project = await WithServiceAsync(tenantId, service => service.CreateProjectAsync(
+            new CreateProjectRequest(environment.CompanyId, "PRJ-BILL", "Billable dev", CustomerId: environment.CustomerId), Actor));
+        var task = await WithServiceAsync(tenantId, service => service.CreateTaskAsync(
+            new CreateProjectTaskRequest(environment.CompanyId, project.Id, "Feature delivery"), Actor));
+        taskId = task.Id;
+
+        var draft = await WithServiceAsync(tenantId, service => service.LogTimeAsync(
+            new LogTimeRequest(environment.CompanyId, taskId, DateOnly.FromDateTime(DateTime.UtcNow), 10m,
+                Billable: true, HourlyRate: 50m), "dev-1"));
+        var submitted = await WithServiceAsync(tenantId, service => service.SubmitTimeAsync(
+            environment.CompanyId, draft.Id, "dev-1"));
+        var approved = await WithServiceAsync(tenantId, service => service.ApproveTimeAsync(
+            environment.CompanyId, submitted.Id, Actor));
+
+        var initialProfit = await WithServiceAsync(tenantId, service =>
+            service.GetProfitabilityAsync(environment.CompanyId, project.Id));
+        initialProfit.BillableValue.Should().Be(500m);
+        initialProfit.InvoicedValue.Should().Be(0m);
+        initialProfit.UninvoicedBillableValue.Should().Be(500m);
+
+        var invoiceResult = await WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(
+            new PostSalesInvoiceRequest(
+                environment.CompanyId,
+                environment.CustomerId,
+                "INV-TIME-001",
+                DateOnly.FromDateTime(DateTime.UtcNow),
+                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30),
+                $"req-{Guid.NewGuid():N}",
+                Lines: [],
+                TimeLines: [new PostSalesInvoiceTimeLine(approved.Id)]),
+            Actor));
+
+        invoiceResult.TotalValue.Should().Be(500m);
+
+        var billedProfit = await WithServiceAsync(tenantId, service =>
+            service.GetProfitabilityAsync(environment.CompanyId, project.Id));
+        billedProfit.BillableValue.Should().Be(500m);
+        billedProfit.InvoicedValue.Should().Be(500m);
+        billedProfit.UninvoicedBillableValue.Should().Be(0m);
+
+        // Attempting to bill the same approved line again throws conflict
+        var duplicateBill = () => WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(
+            new PostSalesInvoiceRequest(
+                environment.CompanyId,
+                environment.CustomerId,
+                "INV-TIME-002",
+                DateOnly.FromDateTime(DateTime.UtcNow),
+                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30),
+                $"req-{Guid.NewGuid():N}",
+                Lines: [],
+                TimeLines: [new PostSalesInvoiceTimeLine(approved.Id)]),
+            Actor));
+
+        (await duplicateBill.Should().ThrowAsync<FinancePostingConflictException>())
+            .WithMessage("*already billed*");
+    }
+
+    [PostgreSqlFact]
+    public async Task Payroll_SettlementReportAndControlledReversal()
+    {
+        var tenantId = $"payrev-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var period = new DateOnly(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+
+        int empId;
+        await using (var hrContext = _fixture.CreateContext(tenantId))
+        {
+            var hr = BuildHrService(hrContext);
+            var emp = await hr.CreateEmployeeAsync(
+                new CreateEmployeeRequest(environment.CompanyId, "EMP-REV", "Zainab Ali",
+                    DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-1)), Actor);
+            empId = emp.Id;
+        }
+
+        await using (var structureContext = _fixture.CreateContext(tenantId))
+        {
+            var payroll = BuildPayrollService(structureContext);
+            await payroll.SetSalaryStructureAsync(
+                new SetSalaryStructureRequest(environment.CompanyId, empId, period, 3000m, 500m), Actor);
+        }
+
+        var run = await WithPayrollServiceAsync(tenantId, service =>
+            service.DraftPayRunAsync(environment.CompanyId, period, Actor));
+        var posted = await WithPayrollServiceAsync(tenantId, service =>
+            service.PostPayRunAsync(environment.CompanyId, run.Id, Actor));
+
+        var settlementBefore = await WithPayrollServiceAsync(tenantId, service =>
+            service.GetSettlementReportAsync(environment.CompanyId, posted.Id));
+        settlementBefore.Reconciled.Should().BeTrue();
+        settlementBefore.Reversible.Should().BeTrue();
+
+        var reversed = await WithPayrollServiceAsync(tenantId, service =>
+            service.ReversePayRunAsync(environment.CompanyId, posted.Id, "Correction for payroll recalculation", Actor));
+        reversed.Status.Should().Be(PayRunStatus.Reversed);
+        reversed.ReversalReason.Should().Be("Correction for payroll recalculation");
+        reversed.ReversedBy.Should().Be(Actor);
+
+        var settlementAfter = await WithPayrollServiceAsync(tenantId, service =>
+            service.GetSettlementReportAsync(environment.CompanyId, posted.Id));
+        settlementAfter.Reversible.Should().BeFalse();
+
+        // Reversing again conflicts
+        var repeatReversal = () => WithPayrollServiceAsync(tenantId, service =>
+            service.ReversePayRunAsync(environment.CompanyId, posted.Id, "Second reversal", Actor));
+        (await repeatReversal.Should().ThrowAsync<FinancePostingConflictException>())
+            .WithMessage("*Reversed*cannot be reversed*");
+    }
+
+    [PostgreSqlFact]
+    public async Task Employee_SelfServiceProfileAndSafeOffboarding()
+    {
+        var tenantId = $"hroff-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+
+        var employee = await WithHrServiceAsync(tenantId, service => service.CreateEmployeeAsync(
+            new CreateEmployeeRequest(environment.CompanyId, "EMP-SELF", "Tariq Mansoor",
+                DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-1), Department: "Engineering", UserId: "user-tariq"), Actor));
+
+        var selfView = await WithHrServiceAsync(tenantId, service =>
+            service.GetMyProfileAsync(environment.CompanyId, "user-tariq"));
+        selfView.Should().NotBeNull();
+        selfView!.EmployeeId.Should().Be(employee.Id);
+        selfView.FullName.Should().Be("Tariq Mansoor");
+        selfView.Department.Should().Be("Engineering");
+        selfView.IsActive.Should().BeTrue();
+
+        // Check in open attendance record
+        await WithHrServiceAsync(tenantId, service => service.CheckInAsync(
+            environment.CompanyId, employee.Id, "Morning shift", Actor));
+
+        // Offboarding blocked while attendance record is open
+        var blockedOffboard = () => WithHrServiceAsync(tenantId, service => service.DeactivateEmployeeAsync(
+            environment.CompanyId, employee.Id, "Resigned", Actor));
+        (await blockedOffboard.Should().ThrowAsync<FinancePostingConflictException>())
+            .WithMessage("*open attendance record*");
+
+        // Check out
+        await WithHrServiceAsync(tenantId, service => service.CheckOutAsync(
+            environment.CompanyId, employee.Id, Actor));
+
+        // Deactivation now succeeds
+        var deactivated = await WithHrServiceAsync(tenantId, service => service.DeactivateEmployeeAsync(
+            environment.CompanyId, employee.Id, "Resigned", Actor));
+        deactivated.IsActive.Should().BeFalse();
+    }
+
     private static ProjectService BuildProjectService(InventoryDbContext context) =>
         new(context, new UnitOfWork(context), NullLogger<ProjectService>.Instance);
 
@@ -200,6 +354,50 @@ public sealed class ProjectsHrPayrollPostgreSqlTests
             new AccountPostingPolicyService(context),
             fiscalCalendar,
             NullLogger<PayrollService>.Instance);
+    }
+
+    private static SalesService BuildSalesService(InventoryDbContext context)
+    {
+        var unitOfWork = new UnitOfWork(context);
+        var webhookDispatcher = new Mock<IWebhookDispatcher>();
+        webhookDispatcher
+            .Setup(dispatcher => dispatcher.EnqueueAsync(It.IsAny<WebhookEvent<object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var stockService = new StockService(
+            new Repository<StockInHand>(context),
+            new Repository<StockTransaction>(context),
+            new Repository<Item>(context),
+            new Repository<Location>(context),
+            new Repository<Branch>(context),
+            unitOfWork,
+            webhookDispatcher.Object,
+            new TestTenantContext(context.CurrentTenantId),
+            NullLogger<StockService>.Instance,
+            new Repository<StockValuationBucket>(context),
+            new Repository<StockValuationEntry>(context));
+        var fiscalCalendar = new FiscalCalendarService(context, unitOfWork, NullLogger<FiscalCalendarService>.Instance);
+        var documentNumbers = new DocumentNumberService(context, unitOfWork);
+        return new SalesService(
+            context, unitOfWork, stockService,
+            new JournalPostingService(
+                context, unitOfWork, fiscalCalendar, documentNumbers, NullLogger<JournalPostingService>.Instance),
+            new AccountPostingPolicyService(context),
+            fiscalCalendar,
+            documentNumbers,
+            NullLogger<SalesService>.Instance);
+    }
+
+    private async Task<T> WithSalesServiceAsync<T>(string tenantId, Func<SalesService, Task<T>> action)
+    {
+        var context = _fixture.CreateContext(tenantId);
+        try
+        {
+            return await action(BuildSalesService(context));
+        }
+        finally
+        {
+            await context.DisposeAsync();
+        }
     }
 
     private async Task<T> WithServiceAsync<T>(string tenantId, Func<ProjectService, Task<T>> action)
@@ -267,6 +465,8 @@ public sealed class ProjectsHrPayrollPostgreSqlTests
             var accounts = new[]
             {
                 new ChartOfAccount { CompanyId = companyId, AccountCode = "1000", Name = "Bank", AccountType = "Asset", IsGroupAccount = false, AccountClass = AccountClass.Asset, IsActive = true },
+                new ChartOfAccount { CompanyId = companyId, AccountCode = "1200", Name = "Accounts Receivable", AccountType = "Asset", IsGroupAccount = false, AccountClass = AccountClass.Asset, IsActive = true },
+                new ChartOfAccount { CompanyId = companyId, AccountCode = "4000", Name = "Sales Revenue", AccountType = "Revenue", IsGroupAccount = false, AccountClass = AccountClass.Income, IsActive = true },
                 new ChartOfAccount { CompanyId = companyId, AccountCode = "6000", Name = "Salary Expense", AccountType = "Expense", IsGroupAccount = false, AccountClass = AccountClass.Expense, IsActive = true },
                 new ChartOfAccount { CompanyId = companyId, AccountCode = "2400", Name = "Deductions Payable", AccountType = "Liability", IsGroupAccount = false, AccountClass = AccountClass.Liability, IsActive = true }
             };
@@ -275,6 +475,8 @@ public sealed class ProjectsHrPayrollPostgreSqlTests
             ChartOfAccount ByCode(string code) => accounts.Single(account => account.AccountCode == code);
             setup.CompanyAccountMappings.AddRange(
                 new CompanyAccountMapping { CompanyId = companyId, Role = AccountPostingRole.Bank, ChartOfAccountId = ByCode("1000").Id, IsActive = true },
+                new CompanyAccountMapping { CompanyId = companyId, Role = AccountPostingRole.AccountsReceivable, ChartOfAccountId = ByCode("1200").Id, IsActive = true },
+                new CompanyAccountMapping { CompanyId = companyId, Role = AccountPostingRole.SalesRevenue, ChartOfAccountId = ByCode("4000").Id, IsActive = true },
                 new CompanyAccountMapping { CompanyId = companyId, Role = AccountPostingRole.SalaryExpense, ChartOfAccountId = ByCode("6000").Id, IsActive = true },
                 new CompanyAccountMapping { CompanyId = companyId, Role = AccountPostingRole.DeductionsPayable, ChartOfAccountId = ByCode("2400").Id, IsActive = true });
             await setup.SaveChangesAsAsync(Actor);

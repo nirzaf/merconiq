@@ -130,6 +130,48 @@ public sealed class ManufacturingPostgreSqlTests
             .WithMessage("*own BOM*");
     }
 
+    [PostgreSqlFact]
+    public async Task MaterialProposal_ExplodesBom_DetectsShortagesAndAvailableQuantity()
+    {
+        var tenantId = $"mfg-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        // Stock: ComponentA = 30, ComponentB = 30
+        var bom = await WithServiceAsync(tenantId, service => service.CreateBillOfMaterialsAsync(
+            new CreateBomRequest(environment.CompanyId, environment.FinishedItemId, 1,
+            [
+                new BomLineInput(environment.ComponentAId, 2),
+                new BomLineInput(environment.ComponentBId, 3)
+            ]), Actor));
+
+        // Order 5 units: requires 10 A (avail 30) and 15 B (avail 30) -> Sufficient
+        var sufficientOrder = await WithServiceAsync(tenantId, service => service.CreateWorkOrderAsync(
+            new CreateWorkOrderRequest(environment.CompanyId, bom.Id, 5, environment.LocationId), Actor));
+        var proposal1 = await WithServiceAsync(tenantId, service => service.GetMaterialProposalAsync(
+            environment.CompanyId, sufficientOrder.Id));
+
+        proposal1.Proceed.Should().BeTrue();
+        proposal1.Lines.Should().HaveCount(2);
+        proposal1.Lines.Should().OnlyContain(l => l.ShortageQuantity == 0m && l.Verdict == "Proceed");
+
+        // Order 20 units: requires 40 A (avail 30 -> shortage 10) and 60 B (avail 30 -> shortage 30)
+        var shortageOrder = await WithServiceAsync(tenantId, service => service.CreateWorkOrderAsync(
+            new CreateWorkOrderRequest(environment.CompanyId, bom.Id, 20, environment.LocationId), Actor));
+        var proposal2 = await WithServiceAsync(tenantId, service => service.GetMaterialProposalAsync(
+            environment.CompanyId, shortageOrder.Id));
+
+        proposal2.Proceed.Should().BeFalse();
+        proposal2.Lines.Should().HaveCount(2);
+        var lineA = proposal2.Lines.Single(l => l.ComponentItemId == environment.ComponentAId);
+        lineA.RequiredQuantity.Should().Be(40m);
+        lineA.ShortageQuantity.Should().Be(10m);
+        lineA.Verdict.Should().Be("Shortage");
+
+        var lineB = proposal2.Lines.Single(l => l.ComponentItemId == environment.ComponentBId);
+        lineB.RequiredQuantity.Should().Be(60m);
+        lineB.ShortageQuantity.Should().Be(30m);
+        lineB.Verdict.Should().Be("Shortage");
+    }
+
     private static ManufacturingService BuildService(InventoryDbContext context)
     {
         var unitOfWork = new UnitOfWork(context);

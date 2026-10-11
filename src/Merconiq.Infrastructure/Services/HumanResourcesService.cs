@@ -218,6 +218,66 @@ public sealed class HumanResourcesService(
             Sum(LeaveType.Unpaid), pending);
     }
 
+    /// <inheritdoc />
+    public async Task<EmployeeSelfView?> GetMyProfileAsync(
+        int companyId, string userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        var employee = await context.Employees.SingleOrDefaultAsync(
+            candidate => candidate.CompanyId == companyId && candidate.UserId == userId,
+            cancellationToken);
+        return employee is null
+            ? null
+            : new EmployeeSelfView(employee.Id, employee.Code, employee.FullName,
+                employee.Department, employee.IsActive);
+    }
+
+    /// <inheritdoc />
+    public async Task<Employee> DeactivateEmployeeAsync(
+        int companyId, int employeeId, string reason, string actor, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        var trimmedReason = RequireBounded(reason, "Offboarding reason", 500);
+        Employee deactivated = null!;
+        await unitOfWork.ExecuteInTransactionAsync(async () =>
+        {
+            await unitOfWork.AcquireTenantOperationLockAsync($"hr:{companyId}", cancellationToken);
+            var employee = await context.Employees.SingleOrDefaultAsync(
+                    candidate => candidate.Id == employeeId && candidate.CompanyId == companyId,
+                    cancellationToken)
+                ?? throw new FinancePostingValidationException("Employee not found in this company.");
+            if (!employee.IsActive)
+                throw new FinancePostingConflictException("The employee is already deactivated.");
+            if (await context.AttendanceRecords.AnyAsync(
+                    record => record.CompanyId == companyId && record.EmployeeId == employeeId &&
+                        record.CheckOutAtUtc == null,
+                    cancellationToken))
+                throw new FinancePostingConflictException(
+                    "The employee has an open attendance record; check them out first.");
+            if (await context.LeaveRequests.AnyAsync(
+                    leave => leave.CompanyId == companyId && leave.EmployeeId == employeeId &&
+                        leave.Status == LeaveRequestStatus.Pending,
+                    cancellationToken))
+                throw new FinancePostingConflictException(
+                    "The employee has pending leave requests; decide them before offboarding.");
+
+            employee.IsActive = false;
+            foreach (var structure in await context.SalaryStructures
+                .Where(candidate => candidate.CompanyId == companyId &&
+                    candidate.EmployeeId == employeeId && candidate.IsActive)
+                .ToListAsync(cancellationToken))
+            {
+                structure.IsActive = false;
+            }
+            await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
+            deactivated = employee;
+        }, cancellationToken: cancellationToken);
+        logger.LogInformation(
+            "Employee {EmployeeId} deactivated in company {CompanyId}: {Reason}",
+            employeeId, companyId, trimmedReason);
+        return deactivated;
+    }
+
     private async Task RequireEmployeeAsync(
         int companyId, int employeeId, CancellationToken cancellationToken)
     {

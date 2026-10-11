@@ -150,7 +150,8 @@ public sealed class SalesController(
                 request.PostingDate,
                 request.Notes,
                 request.OverrideCreditLimit,
-                request.CreditOverrideReason),
+                request.CreditOverrideReason,
+                TimeLines: request.TimeLines.Select(line => new PostSalesInvoiceTimeLine(line.TimesheetEntryId)).ToArray()),
             actor,
             cancellationToken);
         return Ok(ApiResponse<SalesInvoicePostResponse>.CreateSuccess(new SalesInvoicePostResponse(
@@ -424,12 +425,21 @@ public sealed class PostSalesInvoiceWriteRequest
 
     [MinLength(1), MaxLength(200)]
     public IReadOnlyList<SalesInvoiceLineWriteRequest> Lines { get; init; } = [];
+
+    /// <summary>Approved, billable, not-yet-billed timesheet entries for service billing.</summary>
+    public IReadOnlyList<SalesInvoiceTimeLineWriteRequest> TimeLines { get; init; } = [];
 }
 
 public sealed class SalesInvoiceLineWriteRequest
 {
     [Range(1, int.MaxValue)]
     public int DeliveryNoteLineId { get; init; }
+}
+
+public sealed class SalesInvoiceTimeLineWriteRequest
+{
+    [Range(1, int.MaxValue)]
+    public int TimesheetEntryId { get; init; }
 }
 
 public sealed record SalesOrderPostResponse(

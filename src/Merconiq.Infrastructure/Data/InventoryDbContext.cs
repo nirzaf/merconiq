@@ -194,6 +194,10 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<WorkOrder> WorkOrders { get; set; } = null!;
     public DbSet<WorkOrderConsumption> WorkOrderConsumptions { get; set; } = null!;
 
+    /// <summary>Service tickets and annual budgets.</summary>
+    public DbSet<ServiceTicket> ServiceTickets { get; set; } = null!;
+    public DbSet<Budget> Budgets { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -2503,7 +2507,15 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(line => new { line.TenantId, line.SalesInvoiceId, line.LineNumber }).IsUnique();
             entity.HasIndex(line => new { line.TenantId, line.DeliveryNoteLineId })
                 .IsUnique()
+                .HasFilter("\"DeliveryNoteLineId\" IS NOT NULL")
                 .HasDatabaseName("UX_SalesInvoiceLines_DeliveryLine");
+            entity.HasIndex(line => new { line.TenantId, line.TimesheetEntryId })
+                .IsUnique()
+                .HasFilter("\"TimesheetEntryId\" IS NOT NULL")
+                .HasDatabaseName("UX_SalesInvoiceLines_TimesheetEntry");
+            entity.ToTable("SalesInvoiceLines", table => table.HasCheckConstraint(
+                "CK_SalesInvoiceLines_OneTarget",
+                "(\"DeliveryNoteLineId\" IS NOT NULL)::int + (\"TimesheetEntryId\" IS NOT NULL)::int = 1"));
             entity.HasOne(line => line.SalesInvoice)
                 .WithMany(invoice => invoice.Lines)
                 .HasForeignKey(line => new { line.SalesInvoiceId, line.TenantId })
@@ -2512,6 +2524,10 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(line => line.DeliveryNoteLine)
                 .WithMany()
                 .HasForeignKey(line => line.DeliveryNoteLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.TimesheetEntry)
+                .WithMany()
+                .HasForeignKey(line => line.TimesheetEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Company>()
                 .WithMany()

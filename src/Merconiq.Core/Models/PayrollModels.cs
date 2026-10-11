@@ -9,3 +9,18 @@ public sealed record SetSalaryStructureRequest(
     DateOnly EffectiveFrom,
     decimal BaseSalary,
     decimal Allowances);
+
+
+/// <summary>Settlement reconciliation for one posted pay run: run totals versus posted journal.</summary>
+public sealed record PayRunSettlementReport(
+    int PayRunId,
+    DateOnly Period,
+    PayRunStatus Status,
+    decimal DeclaredGross,
+    decimal PostedGross,
+    decimal DeclaredNet,
+    decimal PostedNet,
+    bool Reconciled,
+    /// <summary>Payroll journals cannot be reversed generically; corrections use this path.</summary>
+    bool Reversible);
+

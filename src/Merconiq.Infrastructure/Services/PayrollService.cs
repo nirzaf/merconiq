@@ -249,6 +249,129 @@ public sealed class PayrollService(
     }
 
     /// <inheritdoc />
+    public async Task<PayRunSettlementReport> GetSettlementReportAsync(
+        int companyId, int payRunId, CancellationToken cancellationToken = default)
+    {
+        if (companyId <= 0)
+            throw new FinancePostingValidationException("A positive CompanyId is required.");
+        var run = await context.PayRuns
+            .SingleOrDefaultAsync(candidate => candidate.Id == payRunId && candidate.CompanyId == companyId,
+                cancellationToken)
+            ?? throw new FinancePostingValidationException("Pay run not found in this company.");
+
+        decimal postedGross = 0m;
+        decimal postedNet = 0m;
+        if (run.Status != PayRunStatus.Draft)
+        {
+            var lines = await context.JournalLines
+                .Where(line => line.CompanyId == companyId &&
+                    line.JournalEntry.SourceDocumentType == "PayRun" &&
+                    line.JournalEntry.SourceDocumentId == run.Id.ToString(CultureInfo.InvariantCulture) &&
+                    line.JournalEntry.SourceAction == "Post")
+                .ToListAsync(cancellationToken);
+            // Gross = the salary-expense debit; net = the bank credit.
+            postedGross = lines.Where(line => line.Debit > 0).Sum(line => line.Debit);
+            postedNet = lines.Where(line => line.Credit > 0 && line.Debit == 0).Sum(line => line.Credit);
+        }
+
+        return new PayRunSettlementReport(
+            run.Id,
+            run.Period,
+            run.Status,
+            run.TotalGross,
+            postedGross,
+            run.TotalNet,
+            postedNet,
+            run.Status != PayRunStatus.Draft && postedGross == run.TotalGross && postedNet == run.TotalNet,
+            run.Status == PayRunStatus.Posted);
+    }
+
+    /// <inheritdoc />
+    public async Task<PayRun> ReversePayRunAsync(
+        int companyId, int payRunId, string reason, string actor, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        var trimmedReason = reason?.Trim() ?? string.Empty;
+        if (trimmedReason.Length is 0 or > 500)
+            throw new FinancePostingValidationException("A reversal reason of 1 to 500 characters is required.");
+
+        PayRun reversed = null!;
+        await unitOfWork.ExecuteInTransactionAsync(
+            async () =>
+            {
+                await unitOfWork.AcquireTenantOperationLockAsync($"payroll:{companyId}", cancellationToken);
+                var run = await context.PayRuns
+                    .SingleOrDefaultAsync(
+                        candidate => candidate.Id == payRunId && candidate.CompanyId == companyId,
+                        cancellationToken)
+                    ?? throw new FinancePostingValidationException("Pay run not found in this company.");
+                if (run.Status != PayRunStatus.Posted)
+                    throw new FinancePostingConflictException(
+                        $"A {run.Status} pay run cannot be reversed; only posted runs carry settlement.");
+                if (await context.PayRuns.AnyAsync(
+                        candidate => candidate.CompanyId == companyId &&
+                            candidate.ReversalReason != null &&
+                            candidate.Period == run.Period &&
+                            candidate.Id != run.Id,
+                        cancellationToken))
+                    throw new FinancePostingConflictException(
+                        "A corrected (reversed) run already exists for this period; payroll corrections are one-deep.");
+
+                var company = await RequireCompanyAsync(companyId, cancellationToken);
+                var period = new DateOnly(run.Period.Year, run.Period.Month, 1);
+                await fiscalCalendar.EnsurePeriodOpenForDateAsync(companyId, period, cancellationToken);
+
+                var expenseAccount = await postingPolicy.ResolveAsync(
+                    companyId, AccountPostingRole.SalaryExpense, cancellationToken);
+                var bankAccount = await postingPolicy.ResolveAsync(
+                    companyId, AccountPostingRole.Bank, cancellationToken);
+                var lines = new List<JournalLineInput>
+                {
+                    new(bankAccount.ChartOfAccountId, $"Salary repayment {run.Period:yyyy-MM}", run.TotalNet, 0m)
+                };
+                if (run.TotalDeductions > 0)
+                {
+                    var deductionsAccount = await postingPolicy.ResolveAsync(
+                        companyId, AccountPostingRole.DeductionsPayable, cancellationToken);
+                    lines.Add(new JournalLineInput(
+                        deductionsAccount.ChartOfAccountId, $"Deductions released {run.Period:yyyy-MM}", run.TotalDeductions, 0m));
+                }
+                lines.Add(new JournalLineInput(
+                    expenseAccount.ChartOfAccountId, $"Salary expense reversal {run.Period:yyyy-MM}", 0m, run.TotalGross));
+
+                await journalPosting.PostAsync(
+                    new JournalPostingRequest(
+                        companyId,
+                        period,
+                        company.BaseCurrency,
+                        $"Payroll correction for {run.Period:yyyy-MM}: {trimmedReason}",
+                        "PayRun",
+                        $"{run.Id}-correction",
+                        "Correct",
+                        1,
+                        lines),
+                    actor,
+                    cancellationToken);
+
+                run.Status = PayRunStatus.Reversed;
+                run.ReversalReason = trimmedReason;
+                run.ReversedAtUtc = DateTime.UtcNow;
+                run.ReversedBy = actor.Trim();
+                await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
+                reversed = run;
+            },
+            cancellationToken: cancellationToken,
+            verifySucceeded: async () => await context.PayRuns.AnyAsync(
+                candidate => candidate.Id == payRunId && candidate.Status == PayRunStatus.Reversed,
+                cancellationToken));
+
+        logger.LogInformation(
+            "Pay run {PayRunId} reversed for company {CompanyId}: {Reason}",
+            payRunId, companyId, trimmedReason);
+        return reversed;
+    }
+
+    /// <inheritdoc />
     public Task<PayRun?> GetPayRunAsync(
         int companyId, int payRunId, CancellationToken cancellationToken = default)
     {

@@ -30,3 +30,23 @@ public sealed record WorkOrderCostSummary(
     decimal FinishedValue,
     string? CompletionJournalNumber,
     bool Replayed);
+
+
+/// <summary>One component line of an advisory material proposal.</summary>
+public sealed record MaterialProposalLine(
+    int ComponentItemId,
+    decimal RequiredQuantity,
+    decimal OnHandQuantity,
+    decimal ReservedQuantity,
+    decimal AvailableQuantity,
+    decimal ShortageQuantity,
+    string Verdict);
+
+/// <summary>Advisory material proposal for one released work order; nothing is committed.</summary>
+public sealed record MaterialProposal(
+    int WorkOrderId,
+    string WorkOrderNumber,
+    int QuantityToProduce,
+    bool Proceed,
+    IReadOnlyList<MaterialProposalLine> Lines);
+

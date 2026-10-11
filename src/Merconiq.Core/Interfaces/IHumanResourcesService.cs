@@ -31,4 +31,12 @@ public interface IHumanResourcesService
     /// <summary>Approved leave days per type for one employee in a year.</summary>
     Task<LeaveBalance> GetLeaveBalanceAsync(
         int companyId, int employeeId, int year, CancellationToken cancellationToken = default);
+
+    /// <summary>Resolves the caller's own employee record through its user link.</summary>
+    Task<EmployeeSelfView?> GetMyProfileAsync(
+        int companyId, string userId, CancellationToken cancellationToken = default);
+
+    /// <summary>Safe offboarding: deactivates the employee after open-balance checks.</summary>
+    Task<Employee> DeactivateEmployeeAsync(
+        int companyId, int employeeId, string reason, string actor, CancellationToken cancellationToken = default);
 }
