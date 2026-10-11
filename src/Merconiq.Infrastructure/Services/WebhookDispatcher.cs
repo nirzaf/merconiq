@@ -1,4 +1,5 @@
 using Merconiq.Core.Entities;
+using Merconiq.Core.Services;
 using Merconiq.Core.Interfaces;
 using Merconiq.Core.Models;
 using Merconiq.Infrastructure.Data;
@@ -6,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
+using System.Globalization;
 using System.Text;
 
 namespace Merconiq.Infrastructure.Services;
@@ -130,12 +132,13 @@ public class WebhookDispatcher : IWebhookDispatcher
 
             if (!string.IsNullOrEmpty(subscription.Secret))
             {
-                var keyBytes = Encoding.UTF8.GetBytes(subscription.Secret);
-                var payloadBytes = Encoding.UTF8.GetBytes(jsonPayload);
-                using var hmac = new HMACSHA256(keyBytes);
-                var hash = hmac.ComputeHash(payloadBytes);
-                var signature = Convert.ToHexString(hash).ToLowerInvariant();
-                request.Headers.Add("X-Inventory-Signature", signature);
+                // Replay-protected signing: the timestamp is inside the signature, so a captured
+                // header pair cannot be reused after the receiver's freshness window closes.
+                var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                request.Headers.Add(WebhookSignature.TimestampHeader, timestamp.ToString(CultureInfo.InvariantCulture));
+                request.Headers.Add(
+                    WebhookSignature.SignatureHeader,
+                    WebhookSignature.Compute(subscription.Secret, timestamp, jsonPayload));
             }
 
             using var response = await client.SendAsync(request);

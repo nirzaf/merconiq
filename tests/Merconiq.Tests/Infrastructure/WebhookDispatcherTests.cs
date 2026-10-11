@@ -2,10 +2,12 @@ using System.Linq.Expressions;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Merconiq.Core.Entities;
+using Merconiq.Core.Services;
 using Merconiq.Core.Interfaces;
 using Merconiq.Core.Models;
 using Merconiq.Infrastructure.Data;
@@ -229,10 +231,17 @@ public class WebhookDispatcherTests
         handler.Body.Should().Contain($"\"EventId\":\"{webhookEvent.EventId}\"");
         handler.Body.Should().Contain("\"EventType\":\"Stock.Low\"");
         handler.Body.Should().Contain("\"ItemId\":42");
+        // Replay-protected scheme: the signature covers "timestamp.payload", and the receiver
+        // can reject captured header pairs once the freshness window closes.
+        var timestamp = long.Parse(handler.SignatureTimestamp, CultureInfo.InvariantCulture);
         var expectedSignature = Convert.ToHexString(
-            HMACSHA256.HashData(Encoding.UTF8.GetBytes("shared-secret"), Encoding.UTF8.GetBytes(handler.Body)))
+            HMACSHA256.HashData(
+                Encoding.UTF8.GetBytes("shared-secret"),
+                Encoding.UTF8.GetBytes($"{timestamp}.{handler.Body}")))
             .ToLowerInvariant();
         handler.Signature.Should().Be(expectedSignature);
+        WebhookSignature.Verify(
+            "shared-secret", timestamp, handler.Body, handler.Signature, timestamp).Should().BeTrue();
     }
 
     private static InventoryDbContext CreateContext(string databaseName, string tenantId) =>
@@ -270,6 +279,7 @@ public class WebhookDispatcherTests
         public string? EventIdHeader { get; private set; }
         public string? DeliveryIdHeader { get; private set; }
         public string? Signature { get; private set; }
+            public string SignatureTimestamp { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -282,6 +292,7 @@ public class WebhookDispatcherTests
                 ? deliveryIds.Single()
                 : null;
             Signature = request.Headers.GetValues("X-Inventory-Signature").Single();
+            SignatureTimestamp = request.Headers.GetValues("X-Inventory-Timestamp").Single();
             return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
