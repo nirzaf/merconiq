@@ -25,5 +25,7 @@ public enum AccountPostingRole
     DepreciationExpense = 15,
     GainOnDisposal = 16,
     LossOnDisposal = 17,
-    EmployeeExpensesPayable = 18
+    EmployeeExpensesPayable = 18,
+    SalaryExpense = 19,
+    DeductionsPayable = 20
 }

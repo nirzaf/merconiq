@@ -173,6 +173,21 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SalesCreditNote> SalesCreditNotes { get; set; } = null!;
     public DbSet<SalesCreditNoteLine> SalesCreditNoteLines { get; set; } = null!;
 
+    /// <summary>Projects, tasks and approved billable time.</summary>
+    public DbSet<Project> Projects { get; set; } = null!;
+    public DbSet<ProjectTask> ProjectTasks { get; set; } = null!;
+    public DbSet<TimesheetEntry> TimesheetEntries { get; set; } = null!;
+
+    /// <summary>HR: employees, attendance and leave.</summary>
+    public DbSet<Employee> Employees { get; set; } = null!;
+    public DbSet<AttendanceRecord> AttendanceRecords { get; set; } = null!;
+    public DbSet<LeaveRequest> LeaveRequests { get; set; } = null!;
+
+    /// <summary>Payroll: salary structures, pay runs and payslips.</summary>
+    public DbSet<SalaryStructure> SalaryStructures { get; set; } = null!;
+    public DbSet<PayRun> PayRuns { get; set; } = null!;
+    public DbSet<Payslip> Payslips { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -2836,6 +2851,212 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne<Company>()
                 .WithMany()
                 .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasQueryFilter(project => project.TenantId == CurrentTenantId);
+            entity.Property(project => project.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(project => project.Code).HasMaxLength(32).IsRequired();
+            entity.Property(project => project.Name).HasMaxLength(200).IsRequired();
+            entity.Property(project => project.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(project => project.Notes).HasMaxLength(500);
+            entity.HasIndex(project => new { project.TenantId, project.CompanyId, project.Code }).IsUnique();
+            entity.HasOne(project => project.Customer)
+                .WithMany()
+                .HasForeignKey(project => project.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(project => new { project.CompanyId, project.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProjectTask>(entity =>
+        {
+            entity.HasQueryFilter(task => task.TenantId == CurrentTenantId);
+            entity.Property(task => task.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(task => task.Name).HasMaxLength(200).IsRequired();
+            entity.Property(task => task.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.HasIndex(task => new { task.TenantId, task.ProjectId });
+            entity.HasOne(task => task.Project)
+                .WithMany()
+                .HasForeignKey(task => new { task.ProjectId, task.TenantId })
+                .HasPrincipalKey(project => new { project.Id, project.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(task => new { task.CompanyId, task.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<TimesheetEntry>(entity =>
+        {
+            entity.HasQueryFilter(entry => entry.TenantId == CurrentTenantId);
+            entity.Property(entry => entry.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.WorkerId).HasMaxLength(450).IsRequired();
+            entity.Property(entry => entry.Hours).HasColumnType("decimal(5,2)");
+            entity.Property(entry => entry.HourlyRate).HasColumnType("decimal(18,6)");
+            entity.Property(entry => entry.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(entry => entry.ApprovedBy).HasMaxLength(256);
+            entity.Property(entry => entry.RejectionReason).HasMaxLength(500);
+            entity.Property(entry => entry.Notes).HasMaxLength(500);
+            entity.ToTable("TimesheetEntries", table => table.HasCheckConstraint(
+                "CK_TimesheetEntries_Hours",
+                "\"Hours\" > 0 AND \"HourlyRate\" >= 0"));
+            entity.HasIndex(entry => new { entry.TenantId, entry.ProjectId, entry.WorkDate });
+            entity.HasOne(entry => entry.Project)
+                .WithMany()
+                .HasForeignKey(entry => new { entry.ProjectId, entry.TenantId })
+                .HasPrincipalKey(project => new { project.Id, project.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(entry => entry.ProjectTask)
+                .WithMany()
+                .HasForeignKey(entry => new { entry.ProjectTaskId, entry.TenantId })
+                .HasPrincipalKey(task => new { task.Id, task.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(entry => new { entry.CompanyId, entry.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Employee>(entity =>
+        {
+            entity.HasQueryFilter(employee => employee.TenantId == CurrentTenantId);
+            entity.Property(employee => employee.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(employee => employee.Code).HasMaxLength(32).IsRequired();
+            entity.Property(employee => employee.FullName).HasMaxLength(200).IsRequired();
+            entity.Property(employee => employee.Department).HasMaxLength(100);
+            entity.Property(employee => employee.Position).HasMaxLength(100);
+            entity.Property(employee => employee.UserId).HasMaxLength(450);
+            entity.HasIndex(employee => new { employee.TenantId, employee.CompanyId, employee.Code }).IsUnique();
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(employee => new { employee.CompanyId, employee.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AttendanceRecord>(entity =>
+        {
+            entity.HasQueryFilter(record => record.TenantId == CurrentTenantId);
+            entity.Property(record => record.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.Notes).HasMaxLength(500);
+            entity.HasIndex(record => new { record.TenantId, record.CompanyId, record.EmployeeId, record.WorkDate })
+                .IsUnique()
+                .HasFilter("\"CheckOutAtUtc\" IS NULL");
+            entity.HasOne(record => record.Employee)
+                .WithMany()
+                .HasForeignKey(record => new { record.EmployeeId, record.TenantId })
+                .HasPrincipalKey(employee => new { employee.Id, employee.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(record => new { record.CompanyId, record.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<LeaveRequest>(entity =>
+        {
+            entity.HasQueryFilter(leave => leave.TenantId == CurrentTenantId);
+            entity.Property(leave => leave.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(leave => leave.LeaveType).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(leave => leave.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(leave => leave.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(leave => leave.DecidedBy).HasMaxLength(256);
+            entity.Property(leave => leave.DecisionReason).HasMaxLength(500);
+            entity.ToTable("LeaveRequests", table => table.HasCheckConstraint(
+                "CK_LeaveRequests_Range",
+                "\"EndDate\" >= \"StartDate\" AND \"Days\" > 0"));
+            entity.HasIndex(leave => new { leave.TenantId, leave.CompanyId, leave.EmployeeId, leave.Status });
+            entity.HasOne(leave => leave.Employee)
+                .WithMany()
+                .HasForeignKey(leave => new { leave.EmployeeId, leave.TenantId })
+                .HasPrincipalKey(employee => new { employee.Id, employee.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(leave => new { leave.CompanyId, leave.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalaryStructure>(entity =>
+        {
+            entity.HasQueryFilter(structure => structure.TenantId == CurrentTenantId);
+            entity.Property(structure => structure.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(structure => structure.BaseSalary).HasColumnType("decimal(18,6)");
+            entity.Property(structure => structure.Allowances).HasColumnType("decimal(18,6)");
+            entity.HasIndex(structure => new { structure.TenantId, structure.CompanyId, structure.EmployeeId, structure.EffectiveFrom })
+                .IsUnique();
+            entity.HasOne(structure => structure.Employee)
+                .WithMany()
+                .HasForeignKey(structure => new { structure.EmployeeId, structure.TenantId })
+                .HasPrincipalKey(employee => new { employee.Id, employee.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(structure => new { structure.CompanyId, structure.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PayRun>(entity =>
+        {
+            entity.HasQueryFilter(run => run.TenantId == CurrentTenantId);
+            entity.Property(run => run.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(run => run.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(run => run.TotalGross).HasColumnType("decimal(18,6)");
+            entity.Property(run => run.TotalDeductions).HasColumnType("decimal(18,6)");
+            entity.Property(run => run.TotalNet).HasColumnType("decimal(18,6)");
+            entity.Property(run => run.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(run => run.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(run => run.PostedBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(run => new { run.Id, run.TenantId });
+            entity.HasIndex(run => new { run.TenantId, run.CompanyId, run.Period })
+                .IsUnique()
+                .HasDatabaseName("UX_PayRuns_Period");
+            entity.HasIndex(run => new { run.TenantId, run.CompanyId, run.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_PayRuns_RequestKey");
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(run => new { run.CompanyId, run.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Payslip>(entity =>
+        {
+            entity.HasQueryFilter(slip => slip.TenantId == CurrentTenantId);
+            entity.Property(slip => slip.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(slip => slip.BaseSalary).HasColumnType("decimal(18,6)");
+            entity.Property(slip => slip.Allowances).HasColumnType("decimal(18,6)");
+            entity.Property(slip => slip.Deductions).HasColumnType("decimal(18,6)");
+            entity.Property(slip => slip.Gross).HasColumnType("decimal(18,6)");
+            entity.Property(slip => slip.Net).HasColumnType("decimal(18,6)");
+            entity.Property(slip => slip.Notes).HasMaxLength(500);
+            entity.HasIndex(slip => new { slip.TenantId, slip.PayRunId, slip.EmployeeId }).IsUnique();
+            entity.HasOne(slip => slip.PayRun)
+                .WithMany(run => run.Payslips)
+                .HasForeignKey(slip => new { slip.PayRunId, slip.TenantId })
+                .HasPrincipalKey(run => new { run.Id, run.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(slip => slip.Employee)
+                .WithMany()
+                .HasForeignKey(slip => new { slip.EmployeeId, slip.TenantId })
+                .HasPrincipalKey(employee => new { employee.Id, employee.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(slip => new { slip.CompanyId, slip.TenantId })
                 .HasPrincipalKey(company => new { company.Id, company.TenantId })
                 .OnDelete(DeleteBehavior.Restrict);
         });
