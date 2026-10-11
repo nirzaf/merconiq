@@ -56,6 +56,10 @@ public sealed class ChartOfAccountsPostgreSqlIntegrationTests(PostgreSqlIntegrat
             await using (var setup = new InventoryDbContext(options, new TestTenantContext(tenantId)))
             {
                 await setup.Database.MigrateAsync();
+                // Migrations newer than the chart migration sit above it; remove them first so
+                // the scenario below exercises the chart downgrade path itself, exactly as it
+                // behaves when the chart migration is the repository head.
+                await setup.Database.MigrateAsync(chartMigration);
                 var company = new Company
                 {
                     Code = "SYN-CHART-DOWNGRADE",

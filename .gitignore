@@ -32,6 +32,9 @@ bld/
 .idea/
 *.sln.iml
 
+# ZCode / Editor
+.zcodeignore
+
 # NuGet Packages
 *.nupkg
 *.snupkg

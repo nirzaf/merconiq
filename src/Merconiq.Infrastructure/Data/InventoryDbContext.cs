@@ -111,6 +111,37 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<DocumentLineIdentity> DocumentLineIdentities { get; set; } = null!;
     public DbSet<DocumentLineLink> DocumentLineLinks { get; set; } = null!;
 
+    /// <summary>Company-owned fiscal-year calendars gating financial posting dates.</summary>
+    public DbSet<FiscalYear> FiscalYears { get; set; } = null!;
+    public DbSet<FiscalPeriod> FiscalPeriods { get; set; } = null!;
+
+    /// <summary>Posted, immutable general-ledger journals and their lines.</summary>
+    public DbSet<JournalEntry> JournalEntries { get; set; } = null!;
+    public DbSet<JournalLine> JournalLines { get; set; } = null!;
+
+    /// <summary>Company posting-policy role-to-account mappings.</summary>
+    public DbSet<CompanyAccountMapping> CompanyAccountMappings { get; set; } = null!;
+
+    /// <summary>Posted, immutable goods receipts against approved purchase orders.</summary>
+    public DbSet<GoodsReceipt> GoodsReceipts { get; set; } = null!;
+    public DbSet<GoodsReceiptLine> GoodsReceiptLines { get; set; } = null!;
+
+    /// <summary>Posted, immutable supplier invoices matched to receipts.</summary>
+    public DbSet<PurchaseInvoice> PurchaseInvoices { get; set; } = null!;
+    public DbSet<PurchaseInvoiceLine> PurchaseInvoiceLines { get; set; } = null!;
+
+    /// <summary>Posted, immutable payments and their allocations.</summary>
+    public DbSet<PaymentEntry> PaymentEntries { get; set; } = null!;
+    public DbSet<PaymentAllocation> PaymentAllocations { get; set; } = null!;
+
+    /// <summary>Approved sales orders (commitments only), posted deliveries and sales invoices.</summary>
+    public DbSet<SalesOrder> SalesOrders { get; set; } = null!;
+    public DbSet<SalesOrderLine> SalesOrderLines { get; set; } = null!;
+    public DbSet<DeliveryNote> DeliveryNotes { get; set; } = null!;
+    public DbSet<DeliveryNoteLine> DeliveryNoteLines { get; set; } = null!;
+    public DbSet<SalesInvoice> SalesInvoices { get; set; } = null!;
+    public DbSet<SalesInvoiceLine> SalesInvoiceLines { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -121,6 +152,9 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
         EnsureStockCountVariancesAreAppendOnly();
         EnsureTransferTransitEntriesAreAppendOnly();
         EnsureTransferTransitSettlementsAreAppendOnly();
+        EnsureJournalRecordsAreAppendOnly();
+        EnsureGoodsReceiptsAreAppendOnly();
+        EnsureProcurementFinanceRecordsAreAppendOnly();
         NormalizeStockLotExpiryDates();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -137,6 +171,9 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
         EnsureStockCountVariancesAreAppendOnly();
         EnsureTransferTransitEntriesAreAppendOnly();
         EnsureTransferTransitSettlementsAreAppendOnly();
+        EnsureJournalRecordsAreAppendOnly();
+        EnsureGoodsReceiptsAreAppendOnly();
+        EnsureProcurementFinanceRecordsAreAppendOnly();
         NormalizeStockLotExpiryDates();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
@@ -179,6 +216,9 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
         EnsureStockCountVariancesAreAppendOnly();
         EnsureTransferTransitEntriesAreAppendOnly();
         EnsureTransferTransitSettlementsAreAppendOnly();
+        EnsureJournalRecordsAreAppendOnly();
+        EnsureGoodsReceiptsAreAppendOnly();
+        EnsureProcurementFinanceRecordsAreAppendOnly();
         NormalizeStockLotExpiryDates();
         var currentUser = auditUsername.Trim();
         var utcNow = DateTime.UtcNow;
@@ -295,6 +335,46 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
         {
             throw new InvalidOperationException("Transfer transit settlements are append-only and cannot be updated or deleted.");
+        }
+    }
+
+    private void EnsureJournalRecordsAreAppendOnly()
+    {
+        if (ChangeTracker.Entries<JournalEntry>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+            || ChangeTracker.Entries<JournalLine>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException(
+                "Journal entries and lines are append-only; corrections must use source-linked reversals.");
+        }
+    }
+
+    private void EnsureProcurementFinanceRecordsAreAppendOnly()
+    {
+        if (ChangeTracker.Entries<PurchaseInvoice>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+            || ChangeTracker.Entries<PurchaseInvoiceLine>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+            || ChangeTracker.Entries<PaymentEntry>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+            || ChangeTracker.Entries<PaymentAllocation>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException(
+                "Purchase invoices and payments are append-only; corrections use credit notes and reversals.");
+        }
+    }
+
+    private void EnsureGoodsReceiptsAreAppendOnly()
+    {
+        if (ChangeTracker.Entries<GoodsReceipt>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+            || ChangeTracker.Entries<GoodsReceiptLine>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException(
+                "Goods receipts are append-only; corrections must use procurement returns or credit notes.");
         }
     }
 
@@ -1509,6 +1589,481 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
                 .ValueGeneratedOnAddOrUpdate()
                 .IsConcurrencyToken();
             entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.DocumentType, e.Period }).IsUnique();
+        });
+
+        modelBuilder.Entity<FiscalYear>(entity =>
+        {
+            entity.HasQueryFilter(year => year.TenantId == CurrentTenantId);
+            entity.Property(year => year.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(year => year.Name).HasMaxLength(100).IsRequired();
+            entity.HasAlternateKey(year => new { year.Id, year.CompanyId, year.TenantId });
+            entity.HasIndex(year => new { year.TenantId, year.CompanyId });
+            entity.ToTable("FiscalYears", table => table.HasCheckConstraint(
+                "CK_FiscalYears_Range",
+                "\"EndDate\" >= \"StartDate\" AND \"Name\" <> '' AND \"Name\" = btrim(\"Name\")"));
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(year => new { year.CompanyId, year.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FiscalPeriod>(entity =>
+        {
+            entity.HasQueryFilter(period => period.TenantId == CurrentTenantId);
+            entity.Property(period => period.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(period => period.Name).HasMaxLength(100).IsRequired();
+            entity.Property(period => period.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(period => period.ClosedBy).HasMaxLength(256);
+            entity.Property(period => period.ReopenedBy).HasMaxLength(256);
+            entity.Property(period => period.ReopenReason).HasMaxLength(500);
+            entity.HasIndex(period => new { period.TenantId, period.FiscalYearId, period.PeriodNumber }).IsUnique();
+            entity.HasIndex(period => new { period.TenantId, period.CompanyId, period.StartDate }).IsUnique();
+            entity.ToTable("FiscalPeriods", table => table.HasCheckConstraint(
+                "CK_FiscalPeriods_Range",
+                "\"EndDate\" >= \"StartDate\" AND \"PeriodNumber\" BETWEEN 1 AND 13 AND \"Name\" <> '' AND \"Name\" = btrim(\"Name\")"));
+            entity.HasOne(period => period.FiscalYear)
+                .WithMany(year => year.Periods)
+                .HasForeignKey(period => new { period.FiscalYearId, period.CompanyId, period.TenantId })
+                .HasPrincipalKey(year => new { year.Id, year.CompanyId, year.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(period => new { period.CompanyId, period.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<JournalEntry>(entity =>
+        {
+            entity.HasQueryFilter(entry => entry.TenantId == CurrentTenantId);
+            entity.Property(entry => entry.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.JournalNumber).HasMaxLength(50).IsRequired();
+            entity.Property(entry => entry.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(entry => entry.Description).HasMaxLength(500).IsRequired();
+            entity.Property(entry => entry.SourceDocumentType).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.SourceDocumentId).HasMaxLength(128).IsRequired();
+            entity.Property(entry => entry.SourceAction).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.PostedBy).HasMaxLength(256).IsRequired();
+            entity.Property(entry => entry.ReversalReason).HasMaxLength(500);
+            entity.Property(entry => entry.TotalDebit).HasColumnType("decimal(18,6)");
+            entity.Property(entry => entry.TotalCredit).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(entry => new { entry.Id, entry.TenantId });
+            entity.HasIndex(entry => new
+            {
+                entry.TenantId,
+                entry.CompanyId,
+                entry.SourceDocumentType,
+                entry.SourceDocumentId,
+                entry.SourceAction,
+                entry.SourceVersion
+            }).IsUnique().HasDatabaseName("UX_JournalEntries_SourceAction");
+            entity.HasIndex(entry => new { entry.TenantId, entry.CompanyId, entry.JournalNumber }).IsUnique();
+            entity.HasIndex(entry => new { entry.TenantId, entry.CompanyId, entry.PostingDate });
+            entity.ToTable("JournalEntries", table => table.HasCheckConstraint(
+                "CK_JournalEntries_Balanced",
+                "\"TotalDebit\" >= 0 AND \"TotalCredit\" >= 0 AND \"TotalDebit\" = \"TotalCredit\" AND \"TotalDebit\" > 0"));
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(entry => new { entry.CompanyId, entry.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(entry => entry.ReversalOfJournalEntry)
+                .WithMany()
+                .HasForeignKey(entry => new { entry.ReversalOfJournalEntryId, entry.TenantId })
+                .HasPrincipalKey(original => new { original.Id, original.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<JournalLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.AccountCodeSnapshot).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.AccountNameSnapshot).HasMaxLength(200).IsRequired();
+            entity.Property(line => line.Description).HasMaxLength(500);
+            entity.Property(line => line.Debit).HasColumnType("decimal(18,6)");
+            entity.Property(line => line.Credit).HasColumnType("decimal(18,6)");
+            entity.HasIndex(line => new { line.TenantId, line.JournalEntryId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.CompanyId, line.ChartOfAccountId });
+            entity.ToTable("JournalLines", table => table.HasCheckConstraint(
+                "CK_JournalLines_OneSide",
+                "\"Debit\" >= 0 AND \"Credit\" >= 0 AND ((\"Debit\" > 0 AND \"Credit\" = 0) OR (\"Credit\" > 0 AND \"Debit\" = 0))"));
+            entity.HasOne(line => line.JournalEntry)
+                .WithMany(entry => entry.Lines)
+                .HasForeignKey(line => new { line.JournalEntryId, line.TenantId })
+                .HasPrincipalKey(entry => new { entry.Id, entry.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ChartOfAccount>()
+                .WithMany()
+                .HasForeignKey(line => new { line.ChartOfAccountId, line.CompanyId, line.TenantId })
+                .HasPrincipalKey(account => new { account.Id, account.CompanyId, account.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CompanyAccountMapping>(entity =>
+        {
+            entity.HasQueryFilter(mapping => mapping.TenantId == CurrentTenantId);
+            entity.Property(mapping => mapping.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(mapping => mapping.Role).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.HasIndex(mapping => new { mapping.TenantId, mapping.CompanyId, mapping.Role }).IsUnique();
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(mapping => new { mapping.CompanyId, mapping.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(mapping => mapping.Account)
+                .WithMany()
+                .HasForeignKey(mapping => new { mapping.ChartOfAccountId, mapping.CompanyId, mapping.TenantId })
+                .HasPrincipalKey(account => new { account.Id, account.CompanyId, account.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<GoodsReceipt>(entity =>
+        {
+            entity.HasQueryFilter(receipt => receipt.TenantId == CurrentTenantId);
+            entity.Property(receipt => receipt.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(receipt => receipt.ReceiptNumber).HasMaxLength(50).IsRequired();
+            entity.Property(receipt => receipt.SupplierDeliveryReference).HasMaxLength(128);
+            entity.Property(receipt => receipt.Notes).HasMaxLength(500);
+            entity.Property(receipt => receipt.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(receipt => receipt.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(receipt => receipt.ReceivedBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(receipt => new { receipt.Id, receipt.TenantId });
+            entity.HasIndex(receipt => new { receipt.TenantId, receipt.CompanyId, receipt.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_GoodsReceipts_RequestKey");
+            entity.HasIndex(receipt => new { receipt.TenantId, receipt.CompanyId, receipt.PurchaseOrderId });
+            entity.HasOne(receipt => receipt.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(receipt => receipt.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(receipt => receipt.Location)
+                .WithMany()
+                .HasForeignKey(receipt => new { receipt.LocationId, receipt.TenantId })
+                .HasPrincipalKey(location => new { location.Id, location.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(receipt => new { receipt.CompanyId, receipt.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<GoodsReceiptLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.BatchNumber).HasMaxLength(100);
+            entity.ToTable("GoodsReceiptLines", table => table.HasCheckConstraint(
+                "CK_GoodsReceiptLines_Quantities",
+                "\"AcceptedQuantity\" >= 0 AND \"RejectedQuantity\" >= 0 AND \"AcceptedQuantity\" + \"RejectedQuantity\" > 0 AND \"BaseQuantity\" >= 0 AND \"UnitCost\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.GoodsReceiptId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.PurchaseOrderLineId });
+            entity.HasOne(line => line.GoodsReceipt)
+                .WithMany(receipt => receipt.Lines)
+                .HasForeignKey(line => new { line.GoodsReceiptId, line.TenantId })
+                .HasPrincipalKey(receipt => new { receipt.Id, receipt.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.PurchaseOrderLine)
+                .WithMany()
+                .HasForeignKey(line => line.PurchaseOrderLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PurchaseInvoice>(entity =>
+        {
+            entity.HasQueryFilter(invoice => invoice.TenantId == CurrentTenantId);
+            entity.Property(invoice => invoice.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(invoice => invoice.InvoiceNumber).HasMaxLength(128).IsRequired();
+            entity.Property(invoice => invoice.Notes).HasMaxLength(500);
+            entity.Property(invoice => invoice.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(invoice => invoice.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(invoice => invoice.PostedBy).HasMaxLength(256).IsRequired();
+            entity.Property(invoice => invoice.TotalValue).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(invoice => new { invoice.Id, invoice.TenantId });
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.CompanyId, invoice.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_PurchaseInvoices_RequestKey");
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.CompanyId, invoice.SupplierId, invoice.InvoiceNumber })
+                .IsUnique()
+                .HasDatabaseName("UX_PurchaseInvoices_SupplierNumber");
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.CompanyId, invoice.DueDate });
+            entity.HasOne(invoice => invoice.Supplier)
+                .WithMany()
+                .HasForeignKey(invoice => invoice.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(invoice => new { invoice.CompanyId, invoice.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PurchaseInvoiceLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.MatchedValue).HasColumnType("decimal(18,6)");
+            entity.HasIndex(line => new { line.TenantId, line.PurchaseInvoiceId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.GoodsReceiptLineId })
+                .IsUnique()
+                .HasDatabaseName("UX_PurchaseInvoiceLines_ReceiptLine");
+            entity.HasOne(line => line.PurchaseInvoice)
+                .WithMany(invoice => invoice.Lines)
+                .HasForeignKey(line => new { line.PurchaseInvoiceId, line.TenantId })
+                .HasPrincipalKey(invoice => new { invoice.Id, invoice.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.GoodsReceiptLine)
+                .WithMany()
+                .HasForeignKey(line => line.GoodsReceiptLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PaymentEntry>(entity =>
+        {
+            entity.HasQueryFilter(payment => payment.TenantId == CurrentTenantId);
+            entity.Property(payment => payment.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(payment => payment.PaymentType).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(payment => payment.Method).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(payment => payment.Amount).HasColumnType("decimal(18,6)");
+            entity.Property(payment => payment.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(payment => payment.Reference).HasMaxLength(128);
+            entity.Property(payment => payment.Notes).HasMaxLength(500);
+            entity.Property(payment => payment.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(payment => payment.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(payment => payment.PostedBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(payment => new { payment.Id, payment.TenantId });
+            entity.HasIndex(payment => new { payment.TenantId, payment.CompanyId, payment.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_PaymentEntries_RequestKey");
+            entity.HasIndex(payment => new { payment.TenantId, payment.CompanyId, payment.PostingDate });
+            entity.HasOne(payment => payment.Supplier)
+                .WithMany()
+                .HasForeignKey(payment => payment.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(payment => payment.Customer)
+                .WithMany()
+                .HasForeignKey(payment => payment.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(payment => new { payment.CompanyId, payment.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PaymentAllocation>(entity =>
+        {
+            entity.HasQueryFilter(allocation => allocation.TenantId == CurrentTenantId);
+            entity.Property(allocation => allocation.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(allocation => allocation.Amount).HasColumnType("decimal(18,6)");
+            entity.HasIndex(allocation => new { allocation.TenantId, allocation.PaymentEntryId, allocation.LineNumber })
+                .IsUnique();
+            entity.HasIndex(allocation => new { allocation.TenantId, allocation.PurchaseInvoiceId })
+                .HasFilter("\"PurchaseInvoiceId\" IS NOT NULL");
+            entity.HasIndex(allocation => new { allocation.TenantId, allocation.SalesInvoiceId })
+                .HasFilter("\"SalesInvoiceId\" IS NOT NULL");
+            entity.ToTable("PaymentAllocations", table => table.HasCheckConstraint(
+                "CK_PaymentAllocations_OneTarget",
+                "(\"PurchaseInvoiceId\" IS NOT NULL)::int + (\"SalesInvoiceId\" IS NOT NULL)::int = 1"));
+            entity.HasOne(allocation => allocation.PaymentEntry)
+                .WithMany(payment => payment.Allocations)
+                .HasForeignKey(allocation => new { allocation.PaymentEntryId, allocation.TenantId })
+                .HasPrincipalKey(payment => new { payment.Id, payment.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(allocation => allocation.PurchaseInvoice)
+                .WithMany()
+                .HasForeignKey(allocation => allocation.PurchaseInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(allocation => allocation.SalesInvoice)
+                .WithMany()
+                .HasForeignKey(allocation => allocation.SalesInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(allocation => new { allocation.CompanyId, allocation.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalesOrder>(entity =>
+        {
+            entity.HasQueryFilter(order => order.TenantId == CurrentTenantId);
+            entity.Property(order => order.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(order => order.OrderNumber).HasMaxLength(50).IsRequired();
+            entity.Property(order => order.Notes).HasMaxLength(500);
+            entity.Property(order => order.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(order => order.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(order => order.ApprovedBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(order => new { order.Id, order.TenantId });
+            entity.HasIndex(order => new { order.TenantId, order.CompanyId, order.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_SalesOrders_RequestKey");
+            entity.HasIndex(order => new { order.TenantId, order.CompanyId, order.OrderNumber }).IsUnique();
+            entity.HasOne(order => order.Customer)
+                .WithMany()
+                .HasForeignKey(order => order.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(order => new { order.CompanyId, order.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalesOrderLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.UnitPrice).HasColumnType("decimal(18,6)");
+            entity.Property(line => line.NetValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("SalesOrderLines", table => table.HasCheckConstraint(
+                "CK_SalesOrderLines_Quantities",
+                "\"Quantity\" > 0 AND \"UnitPrice\" >= 0 AND \"NetValue\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.SalesOrderId, line.LineNumber }).IsUnique();
+            entity.HasOne(line => line.SalesOrder)
+                .WithMany(order => order.Lines)
+                .HasForeignKey(line => new { line.SalesOrderId, line.TenantId })
+                .HasPrincipalKey(order => new { order.Id, order.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DeliveryNote>(entity =>
+        {
+            entity.HasQueryFilter(delivery => delivery.TenantId == CurrentTenantId);
+            entity.Property(delivery => delivery.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(delivery => delivery.DeliveryNumber).HasMaxLength(50).IsRequired();
+            entity.Property(delivery => delivery.Notes).HasMaxLength(500);
+            entity.Property(delivery => delivery.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(delivery => delivery.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(delivery => delivery.DeliveredBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(delivery => new { delivery.Id, delivery.TenantId });
+            entity.HasIndex(delivery => new { delivery.TenantId, delivery.CompanyId, delivery.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_DeliveryNotes_RequestKey");
+            entity.HasIndex(delivery => new { delivery.TenantId, delivery.CompanyId, delivery.SalesOrderId });
+            entity.HasOne(delivery => delivery.SalesOrder)
+                .WithMany()
+                .HasForeignKey(delivery => delivery.SalesOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(delivery => delivery.Location)
+                .WithMany()
+                .HasForeignKey(delivery => new { delivery.LocationId, delivery.TenantId })
+                .HasPrincipalKey(location => new { location.Id, location.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(delivery => new { delivery.CompanyId, delivery.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DeliveryNoteLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.BatchNumber).HasMaxLength(100);
+            entity.ToTable("DeliveryNoteLines", table => table.HasCheckConstraint(
+                "CK_DeliveryNoteLines_Quantity",
+                "\"Quantity\" > 0"));
+            entity.HasIndex(line => new { line.TenantId, line.DeliveryNoteId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.SalesOrderLineId });
+            entity.HasIndex(line => new { line.TenantId, line.StockTransactionId }).IsUnique();
+            entity.HasOne(line => line.DeliveryNote)
+                .WithMany(delivery => delivery.Lines)
+                .HasForeignKey(line => new { line.DeliveryNoteId, line.TenantId })
+                .HasPrincipalKey(delivery => new { delivery.Id, delivery.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.SalesOrderLine)
+                .WithMany()
+                .HasForeignKey(line => line.SalesOrderLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.StockTransaction)
+                .WithMany()
+                .HasForeignKey(line => new { line.StockTransactionId, line.TenantId })
+                .HasPrincipalKey(transaction => new { transaction.Id, transaction.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalesInvoice>(entity =>
+        {
+            entity.HasQueryFilter(invoice => invoice.TenantId == CurrentTenantId);
+            entity.Property(invoice => invoice.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(invoice => invoice.InvoiceNumber).HasMaxLength(128).IsRequired();
+            entity.Property(invoice => invoice.Notes).HasMaxLength(500);
+            entity.Property(invoice => invoice.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(invoice => invoice.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(invoice => invoice.PostedBy).HasMaxLength(256).IsRequired();
+            entity.Property(invoice => invoice.TotalValue).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(invoice => new { invoice.Id, invoice.TenantId });
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.CompanyId, invoice.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_SalesInvoices_RequestKey");
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.CompanyId, invoice.InvoiceNumber })
+                .IsUnique()
+                .HasDatabaseName("UX_SalesInvoices_InvoiceNumber");
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.CompanyId, invoice.DueDate });
+            entity.HasOne(invoice => invoice.Customer)
+                .WithMany()
+                .HasForeignKey(invoice => invoice.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(invoice => new { invoice.CompanyId, invoice.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SalesInvoiceLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.RevenueValue).HasColumnType("decimal(18,6)");
+            entity.HasIndex(line => new { line.TenantId, line.SalesInvoiceId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.DeliveryNoteLineId })
+                .IsUnique()
+                .HasDatabaseName("UX_SalesInvoiceLines_DeliveryLine");
+            entity.HasOne(line => line.SalesInvoice)
+                .WithMany(invoice => invoice.Lines)
+                .HasForeignKey(line => new { line.SalesInvoiceId, line.TenantId })
+                .HasPrincipalKey(invoice => new { invoice.Id, invoice.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.DeliveryNoteLine)
+                .WithMany()
+                .HasForeignKey(line => line.DeliveryNoteLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

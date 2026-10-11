@@ -17,7 +17,7 @@ public sealed class PurchaseOrderObligationsApiTests(CustomWebApplicationFactory
     : IClassFixture<CustomWebApplicationFactory>
 {
     [Fact]
-    public async Task Obligations_api_enforces_company_and_tenant_scope_and_exposes_no_receipt_progress()
+    public async Task Obligations_api_enforces_company_and_tenant_scope_and_derives_receipt_progress()
     {
         using var client = factory.CreateAuthenticatedClient("Manager");
         var seeded = await SeedScopeAsync(Guid.NewGuid().ToString("N")[..8]);
@@ -34,12 +34,13 @@ public sealed class PurchaseOrderObligationsApiTests(CustomWebApplicationFactory
         var data = body!.RootElement.GetProperty("data");
         data.GetProperty("purchaseOrderId").GetInt32().Should().Be(seeded.OrderAId);
         data.GetProperty("orderedQuantity").GetInt64().Should().Be(5);
+        data.GetProperty("receivedQuantity").GetInt64().Should().Be(0,
+            "no goods receipt is posted in this fixture, so received derives to zero");
+        data.GetProperty("outstandingQuantity").GetInt64().Should().Be(5);
         var line = data.GetProperty("lines")[0];
         line.GetProperty("orderedQuantity").GetInt32().Should().Be(5);
-        line.TryGetProperty("receivedQuantity", out _).Should().BeFalse();
-        line.TryGetProperty("acceptedQuantity", out _).Should().BeFalse();
-        line.TryGetProperty("rejectedQuantity", out _).Should().BeFalse();
-        data.TryGetProperty("outstandingQuantity", out _).Should().BeFalse();
+        line.GetProperty("receivedQuantity").GetInt32().Should().Be(0);
+        line.GetProperty("rejectedQuantity").GetInt32().Should().Be(0);
         data.TryGetProperty("lifecycleStatus", out _).Should().BeFalse();
         data.TryGetProperty("progressState", out _).Should().BeFalse();
 

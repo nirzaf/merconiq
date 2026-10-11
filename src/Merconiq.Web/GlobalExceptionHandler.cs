@@ -79,6 +79,8 @@ public class GlobalExceptionHandler : IExceptionHandler
             WebhookPayloadTooLargeException => (HttpStatusCode.RequestEntityTooLarge, "Webhook payload too large"),
             ArgumentException => (HttpStatusCode.BadRequest, "Invalid argument"),
             StockAvailabilityConflictException => (HttpStatusCode.Conflict, "Stock availability conflict"),
+            FinancePostingValidationException => (HttpStatusCode.BadRequest, "Finance posting rejected"),
+            FinancePostingConflictException => (HttpStatusCode.Conflict, "Finance posting conflict"),
             InvalidOperationException => (HttpStatusCode.Conflict, "Operation failed"),
             DbUpdateException databaseException when DatabaseExceptionClassifier.IsUniqueConstraintViolation(databaseException)
                 => (HttpStatusCode.Conflict, "Duplicate resource"),
@@ -103,6 +105,7 @@ public class GlobalExceptionHandler : IExceptionHandler
                 {
                     WebhookPayloadTooLargeException => WebhookPayloadPolicy.OversizedEnvelopeDiagnostic,
                     ForecastResourceLimitExceededException or StockAvailabilityConflictException => exception.Message,
+                    FinancePostingValidationException or FinancePostingConflictException => exception.Message,
                     _ => title
                 },
                 Instance = httpContext.Request.Path
