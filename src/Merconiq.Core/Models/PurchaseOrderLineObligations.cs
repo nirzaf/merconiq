@@ -6,13 +6,18 @@ public sealed record PurchaseOrderLineObligation(
     int ItemId,
     string? ItemCode,
     string? ItemDescription,
-    int OrderedQuantity);
+    int OrderedQuantity,
+    int ReceivedQuantity = 0,
+    int RejectedQuantity = 0);
 
 /// <summary>
-/// Read-only ordered-line quantities. This view does not infer receipt, acceptance, rejection, or
-/// outstanding quantities because posted goods-receipt source lines are not part of this slice.
+/// Read-only ordered-line obligations. Received and rejected quantities derive from posted
+/// goods-receipt source lines, never from mutable counters; outstanding is the quantity still
+/// expected to arrive: ordered minus received minus rejected.
 /// </summary>
 public sealed record PurchaseOrderLineObligations(
     int PurchaseOrderId,
     long OrderedQuantity,
+    long ReceivedQuantity,
+    long OutstandingQuantity,
     IReadOnlyList<PurchaseOrderLineObligation> Lines);

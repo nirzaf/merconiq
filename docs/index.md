@@ -34,6 +34,7 @@ Welcome to the documentation site for **Merconiq** — a modern inventory manage
 | **[Readiness baseline](READINESS_BASELINE.md)** | Maintainers | Current SHA, SPF/SFR reconciliation, source checks, and milestone dependencies. |
 | **[Organization ownership](ORGANIZATION_OWNERSHIP.md)** | Maintainers | Tenant, company, branch, location and document ownership, including unknown legacy mappings. |
 | **[Architecture boundaries](ARCHITECTURE.md)** | Developers | Modular-monolith ownership, dependency direction, and extension rules. |
+| **[Finance posting kernel](FINANCE_POSTING.md)** | Developers & reviewers | Fiscal-period controls, immutable balanced journals, source-action idempotency, reversals and trial balance. |
 | **[Repository and artifact cutover](REPOSITORY_CUTOVER.md)** | Maintainers & operators | Canonical links, current Pages reachability, GHCR evidence, legacy references, and Compose volume precautions. |
 
 ---

@@ -180,6 +180,54 @@ validation, reversals, or financial statements. No tax rule, fiscal date,
 account-number convention, posting policy, or approved chart is implied by
 these fields.
 
+### Finance posting kernel (partial foundation)
+
+The finance APIs expose the general-ledger posting kernel: fiscal-calendar
+controls, immutable balanced journals, and a ledger-backed trial balance.
+Company ownership comes from the route; capabilities gate each action.
+`GET /companies/{companyId}/fiscal-years` and journal/trial-balance reads
+require `View`; creating a fiscal year and reopening a closed period require
+`Administer`; closing a period requires `Approve`; posting a journal requires
+`Post`; reversing a journal requires the separate `Reverse` capability.
+
+`POST .../journals` commits one balanced journal for a named source action
+(`sourceDocumentType`, `sourceDocumentId`, `sourceAction`, `sourceVersion`).
+That tuple is unique per company: an identical retry replays the committed
+result with `replayed: true`, and a retry with changed amounts is rejected with
+`409`. Lines must be 2-500 rows, each exactly one side positive, amounts
+already rounded to the company currency scale, in the company base currency,
+against active non-group chart accounts of that company, dated inside an open
+fiscal period. `POST .../journals/{id}/reversals` posts one source-linked
+reversal with swapped sides and a mandatory reason; reversals cannot be
+reversed. `GET .../journals/trial-balance` aggregates posted ledger lines and
+always balances. `PUT .../account-posting-mappings` maps named account roles
+(Inventory, GoodsReceivedNotInvoiced, AccountsPayable, AccountsReceivable,
+Bank, CashOnHand, CostOfGoodsSold, SalesRevenue, TaxPayable, Rounding,
+OpeningEquity, StockInTransit) to active, posting-capable company chart
+accounts.
+
+No business document (purchase order, goods receipt, invoice, stock movement)
+posts through this kernel yet, and no financial statement beyond the trial
+balance is served. Journal rows are append-only; corrections are reversals.
+See `docs/FINANCE_POSTING.md` for the full invariants and evidence.
+
+### Procurement-to-pay and order-to-cash posting APIs
+
+Posted business documents now flow through the finance kernel. Goods receipts
+(`POST /companies/{companyId}/goods-receipts`), supplier invoices
+(`POST .../purchase-invoices`), payments (`POST .../payments`), sales orders,
+deliveries and sales invoices (`POST .../sales/orders|deliveries|invoices`) all
+require the company `Post` capability and an `Idempotency-Key` header: committed
+requests replay with `replayed: true`, and conflicting payloads return `409`.
+Reads require `View`. Receipts, deliveries, invoices and payments are immutable;
+purchase-order approval and sales-order creation never post. Supplier invoices
+match posted receipt lines exactly once and clear GRNI; payments fully allocate
+against open invoices; deliveries issue valued stock (exact moving-average COGS);
+sales invoices match delivered lines exactly once and recognize revenue and AR.
+The purchase-order obligations view now derives received, rejected and
+outstanding quantities from posted receipt lines, and sales-order progress
+derives from posted delivery lines.
+
 ### Tenant unit source-ID export
 
 `GET /api/v1/organization/units/export` requires an API JWT and the tenant

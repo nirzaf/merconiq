@@ -15,7 +15,7 @@ promise that every listed interface is a supported third-party API.
 | Procurement | Supplier and purchase-order contracts, entities and services in `src/Merconiq.Core`; EF mapping/repositories in `src/Merconiq.Infrastructure`; endpoint/UI and DI composition in `src/Merconiq.Web` | An approved purchase order is a procurement document; it is not itself a stock receipt or a posted financial journal. Do not infer a goods-receipt-to-ledger contract that the current source does not implement. |
 | Sales / customer master | Customer entity in `src/Merconiq.Core`; tenant/company ownership, migration and audit in `src/Merconiq.Infrastructure`; company-capability API in `src/Merconiq.Web` | Implements independent company-owned customer records and configuration-only payment-term days. Quotations, orders, invoices, receivables, credit controls, shared customer masters and UI/import workflows remain future work. |
 | Integrations and decision support | Contracts and forecasting services in `src/Merconiq.Core`; webhook delivery, configuration, host services and persistence registrations in `src/Merconiq.Infrastructure` and `src/Merconiq.Web` | The HTTP and webhook behavior documented in `docs/API.md` is part of the declared public v1 contract. Issue #355 tracks additional implementation and evidence; future, undocumented integration behavior is not thereby promised as a stable contract. |
-| General ledger / finance | A company-owned, configuration-only chart-of-account catalog stores company-supplied codes, names, free-form type labels, hierarchy and active/group flags through an API | It is not a journal or posting subsystem. No account defaults/taxonomy, control-account mapping, fiscal period, base-currency posting, tax policy or finance approval is supplied; stock valuation records are not journal entries and are not an accounts-payable or financial-statement source of truth. |
+| General ledger / finance | Fiscal-calendar, journal and posting-policy contracts and models in `src/Merconiq.Core`; `FiscalCalendarService`, `JournalPostingService` and `AccountPostingPolicyService` in `src/Merconiq.Infrastructure`; company-capability API in `src/Merconiq.Web` | The chart-of-account catalog remains company-supplied configuration. The posting kernel commits immutable, balanced `JournalEntry`/`JournalLine` rows exactly once per company/source action inside one transaction, gated by open fiscal periods and company base currency; corrections are source-linked reversals. Goods receipts, supplier invoices, payments, deliveries and sales invoices now post through this kernel with exact stock/GRNI/AP/AR/COGS effects; sales-order and purchase-order approval never post. Stock valuation records remain distinct from journal rows and reconcile through the posting services. See `docs/FINANCE_POSTING.md`. |
 
 These are capability ownership notes, not a claim that code is already split
 into module assemblies. New behavior should stay with the capability that owns
@@ -70,8 +70,11 @@ idempotency (where supported), movement/valuation consistency and transaction
 rollback remain in force. Reports and adapters may read authorized application
 results; they must not write another module's ledger or bypass the posting
 service with direct `DbContext` writes. Never infer a general-ledger posting
-from an inventory valuation entry. The current source tree has no general
-ledger journal model.
+from an inventory valuation entry. The general-ledger journal model exists
+(`JournalEntry`, `JournalLine`) behind `IJournalPostingService`, and the
+procurement and sales posting services are its only writers. Only those
+services may write journal rows, stock rows, receipts, invoices or payments;
+direct `DbContext` writes to posted records are blocked by append-only guards.
 
 ## Existing compile-time seams (limited, not a plugin API)
 

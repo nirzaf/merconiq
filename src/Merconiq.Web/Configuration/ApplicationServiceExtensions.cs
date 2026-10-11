@@ -41,6 +41,13 @@ public static class ApplicationServiceExtensions
         services.AddScoped<IDocumentIdentityService, Merconiq.Infrastructure.Services.DocumentIdentityService>();
         services.AddScoped<IMasterDataImportService, Merconiq.Infrastructure.Services.MasterDataImportService>();
         services.AddScoped<IOpeningStockImportService, Merconiq.Infrastructure.Services.OpeningStockImportService>();
+        services.AddScoped<IFiscalCalendarService, Merconiq.Infrastructure.Services.FiscalCalendarService>();
+        services.AddScoped<IJournalPostingService, Merconiq.Infrastructure.Services.JournalPostingService>();
+        services.AddScoped<IAccountPostingPolicy, Merconiq.Infrastructure.Services.AccountPostingPolicyService>();
+        services.AddScoped<IGoodsReceiptService, Merconiq.Infrastructure.Services.GoodsReceiptService>();
+        services.AddScoped<IPurchaseInvoiceService, Merconiq.Infrastructure.Services.PurchaseInvoiceService>();
+        services.AddScoped<IPaymentService, Merconiq.Infrastructure.Services.PaymentService>();
+        services.AddScoped<ISalesService, Merconiq.Infrastructure.Services.SalesService>();
 
         services.AddOptions<ForecastingOptions>()
             .Bind(configuration.GetSection(ForecastingOptions.SectionName))

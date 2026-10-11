@@ -28,6 +28,7 @@ public class PurchaseOrderService : IPurchaseOrderService
     private readonly IRepository<Item>? _itemRepository;
     private readonly IRepository<UnitOfMeasure>? _unitRepository;
     private readonly IRepository<DocumentIdentity>? _documentRepository;
+    private readonly IRepository<GoodsReceiptLine>? _goodsReceiptLineRepository;
 
     public PurchaseOrderService(
         IRepository<PurchaseOrder> poRepo,
@@ -42,7 +43,8 @@ public class PurchaseOrderService : IPurchaseOrderService
         IRepository<Supplier>? supplierRepository = null,
         IRepository<Item>? itemRepository = null,
         IRepository<UnitOfMeasure>? unitRepository = null,
-        IRepository<DocumentIdentity>? documentRepository = null)
+        IRepository<DocumentIdentity>? documentRepository = null,
+        IRepository<GoodsReceiptLine>? goodsReceiptLineRepository = null)
     {
         _poRepo = poRepo;
         _unitOfWork = unitOfWork;
@@ -57,6 +59,7 @@ public class PurchaseOrderService : IPurchaseOrderService
         _itemRepository = itemRepository;
         _unitRepository = unitRepository;
         _documentRepository = documentRepository;
+        _goodsReceiptLineRepository = goodsReceiptLineRepository;
     }
 
     /// <inheritdoc />
@@ -116,22 +119,43 @@ public class PurchaseOrderService : IPurchaseOrderService
                         .FindAsync(item => itemIds.Contains(item.Id), cancellationToken))
                     .ToDictionary(item => item.Id);
 
+            // Receipt progress derives from posted goods-receipt source lines, never from
+            // mutable counters; when the repository is unavailable the zeros preserve the
+            // legacy ordered-only view.
+            var lineIds = lines.Select(line => line.Id).ToArray();
+            var receiptProgress = lineIds.Length == 0 || _goodsReceiptLineRepository is null
+                ? new Dictionary<int, (int Accepted, int Rejected)>()
+                : (await _goodsReceiptLineRepository
+                        .FindAsync(line => lineIds.Contains(line.PurchaseOrderLineId), cancellationToken))
+                    .GroupBy(line => line.PurchaseOrderLineId)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => (Accepted: group.Sum(line => line.AcceptedQuantity),
+                            Rejected: group.Sum(line => line.RejectedQuantity)));
+
             var lineObligations = lines.Select(line =>
             {
                 items.TryGetValue(line.ItemId, out var item);
                 var ordered = line.Quantity;
+                receiptProgress.TryGetValue(line.Id, out var progress);
                 return new PurchaseOrderLineObligation(
                     line.Id,
                     line.ItemId,
                     item?.ItemCode,
                     item?.Description,
-                    ordered);
+                    ordered,
+                    progress.Accepted,
+                    progress.Rejected);
             }).ToArray();
 
             var orderedQuantity = lineObligations.Sum(line => (long)line.OrderedQuantity);
+            var receivedQuantity = lineObligations.Sum(line => (long)line.ReceivedQuantity);
+            var rejectedQuantity = lineObligations.Sum(line => (long)line.RejectedQuantity);
             obligations = new PurchaseOrderLineObligations(
                 order.Id,
                 orderedQuantity,
+                receivedQuantity,
+                orderedQuantity - receivedQuantity - rejectedQuantity,
                 lineObligations);
         }, cancellationToken);
 
