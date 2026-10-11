@@ -567,8 +567,8 @@ public sealed class SalesService(
             .Where(invoice => invoice.CompanyId == companyId)
             .ToListAsync(cancellationToken);
         var paidByInvoice = await context.PaymentAllocations
-            .Where(allocation => allocation.CompanyId == companyId)
-            .GroupBy(allocation => allocation.SalesInvoiceId)
+            .Where(allocation => allocation.CompanyId == companyId && allocation.SalesInvoiceId != null)
+            .GroupBy(allocation => allocation.SalesInvoiceId!.Value)
             .Select(group => new { SalesInvoiceId = group.Key, Paid = group.Sum(allocation => allocation.Amount) })
             .ToDictionaryAsync(row => row.SalesInvoiceId, row => row.Paid, cancellationToken);
         var customerNames = await context.Customers

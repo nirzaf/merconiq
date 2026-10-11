@@ -198,6 +198,18 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ServiceTicket> ServiceTickets { get; set; } = null!;
     public DbSet<Budget> Budgets { get; set; } = null!;
 
+    /// <summary>Multi-currency exchange rates and FX revaluation runs.</summary>
+    public DbSet<ExchangeRate> ExchangeRates { get; set; } = null!;
+    public DbSet<FxRevaluationRun> FxRevaluationRuns { get; set; } = null!;
+
+    /// <summary>Intercompany relationships and reciprocal transactions.</summary>
+    public DbSet<IntercompanyRelationship> IntercompanyRelationships { get; set; } = null!;
+    public DbSet<IntercompanyTransaction> IntercompanyTransactions { get; set; } = null!;
+
+    /// <summary>Customer and supplier business collaboration portals.</summary>
+    public DbSet<PortalContact> PortalContacts { get; set; } = null!;
+    public DbSet<SupplierCollaborationEntry> SupplierCollaborationEntries { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -3177,6 +3189,65 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
                 .HasForeignKey(consumption => new { consumption.CompanyId, consumption.TenantId })
                 .HasPrincipalKey(company => new { company.Id, company.TenantId })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ExchangeRate>(entity =>
+        {
+            entity.ToTable("ExchangeRates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.FromCurrency).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ToCurrency).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.Rate).HasColumnType("decimal(18,6)");
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.FromCurrency, e.ToCurrency, e.EffectiveDate }).IsUnique();
+        });
+
+        modelBuilder.Entity<FxRevaluationRun>(entity =>
+        {
+            entity.ToTable("FxRevaluationRuns");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.TotalUnrealizedGain).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TotalUnrealizedLoss).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.FiscalPeriodId, e.Status });
+        });
+
+        modelBuilder.Entity<IntercompanyRelationship>(entity =>
+        {
+            entity.ToTable("IntercompanyRelationships");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.ParentCompanyId, e.SubsidiaryCompanyId }).IsUnique();
+        });
+
+        modelBuilder.Entity<IntercompanyTransaction>(entity =>
+        {
+            entity.ToTable("IntercompanyTransactions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ReferenceKey).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.ReferenceKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<PortalContact>(entity =>
+        {
+            entity.ToTable("PortalContacts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Email).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ContactName).HasMaxLength(256).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.PortalType, e.Email }).IsUnique();
+        });
+
+        modelBuilder.Entity<SupplierCollaborationEntry>(entity =>
+        {
+            entity.ToTable("SupplierCollaborationEntries");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.InvoiceAmount).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.SupplierId, e.PurchaseOrderId });
         });
     }
 }

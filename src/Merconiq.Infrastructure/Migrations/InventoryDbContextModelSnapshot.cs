@@ -1835,6 +1835,58 @@ namespace Merconiq.Infrastructure.Migrations
                     b.ToTable("Employees");
                 });
 
+            modelBuilder.Entity("Merconiq.Core.Entities.ExchangeRate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly>("EffectiveDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("FromCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<decimal>("Rate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ToCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "FromCurrency", "ToCurrency", "EffectiveDate")
+                        .IsUnique();
+
+                    b.ToTable("ExchangeRates", (string)null);
+                });
+
             modelBuilder.Entity("Merconiq.Core.Entities.ExpenseClaim", b =>
                 {
                     b.Property<int>("Id")
@@ -2353,6 +2405,62 @@ namespace Merconiq.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Merconiq.Core.Entities.FxRevaluationRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("FiscalPeriodId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("JournalEntryId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("RevaluationDate")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("ReversalJournalEntryId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal>("TotalUnrealizedGain")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("TotalUnrealizedLoss")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "FiscalPeriodId", "Status");
+
+                    b.ToTable("FxRevaluationRuns", (string)null);
+                });
+
             modelBuilder.Entity("Merconiq.Core.Entities.GoodsReceipt", b =>
                 {
                     b.Property<int>("Id")
@@ -2589,6 +2697,135 @@ namespace Merconiq.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("IdempotencyRecords");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.IntercompanyRelationship", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("ParentCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ParentReceivableAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ParentRevenueAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SubsidiaryCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SubsidiaryExpenseAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SubsidiaryPayableAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ParentCompanyId", "SubsidiaryCompanyId")
+                        .IsUnique();
+
+                    b.ToTable("IntercompanyRelationships", (string)null);
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.IntercompanyTransaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReferenceKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("RelationshipId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SourceCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SourceDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TargetCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TargetDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetDocumentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ReferenceKey")
+                        .IsUnique();
+
+                    b.ToTable("IntercompanyTransactions", (string)null);
                 });
 
             modelBuilder.Entity("Merconiq.Core.Entities.Item", b =>
@@ -3669,6 +3906,67 @@ namespace Merconiq.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Payslips");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.PortalContact", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContactName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset?>("InviteExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InviteToken")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("PartyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PortalType")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "PortalType", "Email")
+                        .IsUnique();
+
+                    b.ToTable("PortalContacts", (string)null);
                 });
 
             modelBuilder.Entity("Merconiq.Core.Entities.PosRefund", b =>
@@ -6180,6 +6478,68 @@ namespace Merconiq.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Suppliers");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.SupplierCollaborationEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BuyerReviewNotes")
+                        .HasColumnType("text");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("EntryType")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("InvoiceAmount")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("InvoiceReferenceNumber")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ProposedDeliveryDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("PurchaseOrderId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SupplierId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SupplierReference")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "SupplierId", "PurchaseOrderId");
+
+                    b.ToTable("SupplierCollaborationEntries", (string)null);
                 });
 
             modelBuilder.Entity("Merconiq.Core.Entities.TaxRule", b =>

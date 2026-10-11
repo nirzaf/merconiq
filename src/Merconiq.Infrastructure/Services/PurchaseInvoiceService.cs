@@ -121,8 +121,8 @@ public sealed class PurchaseInvoiceService(
             invoices = invoices.Where(invoice => invoice.SupplierId == supplierFilter);
 
         var paidByInvoice = await context.PaymentAllocations
-            .Where(allocation => allocation.CompanyId == companyId)
-            .GroupBy(allocation => allocation.PurchaseInvoiceId)
+            .Where(allocation => allocation.CompanyId == companyId && allocation.PurchaseInvoiceId != null)
+            .GroupBy(allocation => allocation.PurchaseInvoiceId!.Value)
             .Select(group => new { PurchaseInvoiceId = group.Key, Paid = group.Sum(allocation => allocation.Amount) })
             .ToDictionaryAsync(row => row.PurchaseInvoiceId, row => row.Paid, cancellationToken);
 
@@ -157,8 +157,8 @@ public sealed class PurchaseInvoiceService(
             .Where(invoice => invoice.CompanyId == companyId)
             .ToListAsync(cancellationToken);
         var paidByInvoice = await context.PaymentAllocations
-            .Where(allocation => allocation.CompanyId == companyId)
-            .GroupBy(allocation => allocation.PurchaseInvoiceId)
+            .Where(allocation => allocation.CompanyId == companyId && allocation.PurchaseInvoiceId != null)
+            .GroupBy(allocation => allocation.PurchaseInvoiceId!.Value)
             .Select(group => new { PurchaseInvoiceId = group.Key, Paid = group.Sum(allocation => allocation.Amount) })
             .ToDictionaryAsync(row => row.PurchaseInvoiceId, row => row.Paid, cancellationToken);
         var supplierNames = await context.Suppliers
