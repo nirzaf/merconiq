@@ -112,6 +112,7 @@ public sealed class ChartOfAccountsController(
             AccountType = request.AccountType.Trim(),
             ParentAccountId = request.ParentAccountId,
             IsGroupAccount = request.IsGroupAccount,
+            AccountClass = request.AccountClass,
             IsActive = request.IsActive
         };
         db.ChartOfAccounts.Add(account);
@@ -173,6 +174,7 @@ public sealed class ChartOfAccountsController(
         account.AccountType,
         account.ParentAccountId,
         account.IsGroupAccount,
+        account.AccountClass,
         account.IsActive);
 }
 
@@ -191,6 +193,8 @@ public sealed class ChartOfAccountWriteRequest
     public int? ParentAccountId { get; init; }
 
     public bool IsGroupAccount { get; init; }
+
+    public AccountClass? AccountClass { get; init; }
 
     public bool IsActive { get; init; } = true;
 }
@@ -211,4 +215,5 @@ public sealed record ChartOfAccountResponse(
     string AccountType,
     int? ParentAccountId,
     bool IsGroupAccount,
+    AccountClass? AccountClass,
     bool IsActive);

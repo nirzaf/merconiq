@@ -124,8 +124,18 @@ public sealed class ChartOfAccountsPostgreSqlIntegrationTests(PostgreSqlIntegrat
                 failure.Which.MessageText.Should().Contain(
                     "Cannot downgrade company chart of accounts while account rows exist.");
 
-                (await migrationContext.ChartOfAccounts.SingleAsync(account => account.Id == accountId))
-                    .AccountCode.Should().Be("SYN-CONCURRENT-ACCOUNT");
+                // Query through raw SQL: after the downgrade the schema is older than the
+                // compiled model, so EF projections over changed columns would fail regardless
+                // of catalog preservation.
+                await using (var raw = new NpgsqlConnection(connectionString))
+                {
+                    await raw.OpenAsync();
+                    await using var catalogQuery = new NpgsqlCommand(
+                        "SELECT \"AccountCode\" FROM \"ChartOfAccounts\" WHERE \"Id\" = @id", raw);
+                    catalogQuery.Parameters.AddWithValue("id", accountId);
+                    (await catalogQuery.ExecuteScalarAsync())!
+                        .Should().Be("SYN-CONCURRENT-ACCOUNT");
+                }
                 var appliedMigrations = await migrationContext.Database.GetAppliedMigrationsAsync();
                 appliedMigrations.Should().Contain(chartMigration);
                 appliedMigrations.Last().Should().Be(chartMigration);

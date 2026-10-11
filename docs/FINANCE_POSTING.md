@@ -79,6 +79,9 @@ Journal numbers come from the existing tenant-scoped document sequences with doc
 | Customer receipt (fully allocated) | Dr Bank or Cash / Cr AR | `PaymentService` |
 | Delivery (approved sales order) | Dr COGS / Cr Inventory at the exact issued moving-average value | `SalesService` |
 | Sales invoice (matches delivery lines once) | Dr AR / Cr Sales revenue | `SalesService` |
+| POS checkout (open shift, mixed tenders) | Dr Cash/Bank per tender / Cr Sales revenue, plus exact COGS | `PosService` |
+| POS refund (bounded by sold balance) | Dr Sales / Cr Cash, plus Dr Inventory / Cr COGS for restocked value | `PosService` |
+| POS shift close variance | Dr or Cr Cash over/short against Cash on hand, once | `PosService` |
 
 Every document is immutable once posted, idempotent per `Idempotency-Key`/request key, gated by
 open fiscal periods and company base currency, and reserves account assignments through the
@@ -94,8 +97,9 @@ journals, credit notes, returns or POS yet.
 
 - No P&L, balance sheet, account-hierarchy rollup or multi-currency statements — only the
   ledger-backed trial balance.
-- No procurement returns/rejections to stock (TS-08), credit notes, or sales returns.
-- No quotation stage, credit-control, reservation-backed promising, or POS.
+- No procurement returns/rejections to stock (TS-08), purchase/sales credit notes outside POS refunds.
+- No quotation stage, credit-control, or reservation-backed promising; POS offline mode, receipt
+  printing and card-settlement reconciliation are open.
 - No draft documents, approval workflows, or document editing. Posted means posted.
 - No chart taxonomy or default accounts: companies still supply their own codes and mappings.
 

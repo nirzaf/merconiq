@@ -23,6 +23,7 @@ namespace Merconiq.Tests.Integration;
 /// and never over-receives a purchase-order line. Requires RUN_POSTGRES_TESTS=true.
 /// </summary>
 [Collection(PostgreSqlIntegrationCollection.Name)]
+[Trait("Category", "PostgreSQL")]
 public sealed class GoodsReceiptPostgreSqlTests
 {
     private const string Actor = "goods-receipt-tester";

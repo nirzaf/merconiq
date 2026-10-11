@@ -21,6 +21,7 @@ namespace Merconiq.Tests.Integration;
 /// over-allocating, even under concurrency. Requires RUN_POSTGRES_TESTS=true.
 /// </summary>
 [Collection(PostgreSqlIntegrationCollection.Name)]
+[Trait("Category", "PostgreSQL")]
 public sealed class PurchaseInvoicePaymentPostgreSqlTests
 {
     private const string Actor = "p2p-tester";

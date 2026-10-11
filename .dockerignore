@@ -16,3 +16,4 @@
 **/*.md
 **/*.log
 !README.md
+global.json

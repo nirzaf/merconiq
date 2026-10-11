@@ -21,6 +21,7 @@ namespace Merconiq.Tests.Integration;
 /// and settle the receivable. Requires RUN_POSTGRES_TESTS=true.
 /// </summary>
 [Collection(PostgreSqlIntegrationCollection.Name)]
+[Trait("Category", "PostgreSQL")]
 public sealed class SalesOrderToCashPostgreSqlTests
 {
     private const string Actor = "o2c-tester";

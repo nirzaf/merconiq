@@ -20,6 +20,7 @@ namespace Merconiq.Tests.Integration;
 /// These tests require real PostgreSQL semantics and are skipped unless RUN_POSTGRES_TESTS=true.
 /// </summary>
 [Collection(PostgreSqlIntegrationCollection.Name)]
+[Trait("Category", "PostgreSQL")]
 public sealed class FinancePostingPostgreSqlTests
 {
     private const string Actor = "finance-integration-tester";
