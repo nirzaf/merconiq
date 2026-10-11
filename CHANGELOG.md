@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Double-entry general ledger posting kernel with fiscal years, periods, account roles, and company-scoped mappings.
+- Procure-to-Pay (P2P) workflow: goods receipts, purchase invoices, and payment allocations.
+- Order-to-Cash (O2C) workflow: sales orders, delivery notes, and sales invoices.
+- POS retail session management, sales receipts, and refunds with automated stock and ledger posting.
+- Bounded supplier and customer credit notes with inventory restock and ledger adjustments.
+- Ledger-backed financial statements (Profit & Loss and Balance Sheet) derived from journal lines.
+
 ### Changed
 
 - Renamed the project from Stockpile to Merconiq.
