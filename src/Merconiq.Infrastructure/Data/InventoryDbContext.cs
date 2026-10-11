@@ -227,6 +227,27 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SupplierQuotation> SupplierQuotations { get; set; } = null!;
     public DbSet<SupplierQuotationLine> SupplierQuotationLines { get; set; } = null!;
 
+    /// <summary>Serial numbers, FIFO valuation layers, and automated reorder rules.</summary>
+    public DbSet<SerialNumber> SerialNumbers { get; set; } = null!;
+    public DbSet<StockFifoLayer> StockFifoLayers { get; set; } = null!;
+    public DbSet<ItemReorderRule> ItemReorderRules { get; set; } = null!;
+
+    /// <summary>Workstations, routing operations, and job cards.</summary>
+    public DbSet<Workstation> Workstations { get; set; } = null!;
+    public DbSet<RoutingOperation> RoutingOperations { get; set; } = null!;
+    public DbSet<JobCard> JobCards { get; set; } = null!;
+
+    /// <summary>Electronic bank feeds and print templates.</summary>
+    public DbSet<BankStatementFile> BankStatementFiles { get; set; } = null!;
+    public DbSet<BankStatementTransaction> BankStatementTransactions { get; set; } = null!;
+    public DbSet<PrintFormatTemplate> PrintFormatTemplates { get; set; } = null!;
+
+    /// <summary>Subcontracting, sales partner commissions, and dunning notices.</summary>
+    public DbSet<SubcontractingOrder> SubcontractingOrders { get; set; } = null!;
+    public DbSet<SubcontractingSuppliedItem> SubcontractingSuppliedItems { get; set; } = null!;
+    public DbSet<SalesPartnerCommission> SalesPartnerCommissions { get; set; } = null!;
+    public DbSet<DunningNotice> DunningNotices { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -3373,6 +3394,124 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(e => e.Rate).HasColumnType("decimal(18,4)");
             entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,4)");
             entity.HasIndex(e => new { e.TenantId, e.SupplierQuotationId, e.ItemId });
+        });
+
+        modelBuilder.Entity<SerialNumber>(entity =>
+        {
+            entity.ToTable("SerialNumbers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SerialNo).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.ItemId, e.SerialNo }).IsUnique();
+        });
+
+        modelBuilder.Entity<StockFifoLayer>(entity =>
+        {
+            entity.ToTable("StockFifoLayers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.UnitCost).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.ItemId, e.LocationId });
+        });
+
+        modelBuilder.Entity<ItemReorderRule>(entity =>
+        {
+            entity.ToTable("ItemReorderRules");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.ItemId, e.LocationId }).IsUnique();
+        });
+
+        modelBuilder.Entity<Workstation>(entity =>
+        {
+            entity.ToTable("Workstations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.HourlyRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.OperatingCapacityHours).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<RoutingOperation>(entity =>
+        {
+            entity.ToTable("RoutingOperations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.OperationName).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.CostPerHour).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<JobCard>(entity =>
+        {
+            entity.ToTable("JobCards");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.TotalCost).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<BankStatementFile>(entity =>
+        {
+            entity.ToTable("BankStatementFiles");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.FileName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OpeningBalance).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ClosingBalance).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<BankStatementTransaction>(entity =>
+        {
+            entity.ToTable("BankStatementTransactions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<PrintFormatTemplate>(entity =>
+        {
+            entity.ToTable("PrintFormatTemplates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(128).IsRequired();
+        });
+
+        modelBuilder.Entity<SubcontractingOrder>(entity =>
+        {
+            entity.ToTable("SubcontractingOrders");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ServiceRate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TotalServiceCost).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<SubcontractingSuppliedItem>(entity =>
+        {
+            entity.ToTable("SubcontractingSuppliedItems");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.RequiredQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TransferredQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ConsumedQuantity).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<SalesPartnerCommission>(entity =>
+        {
+            entity.ToTable("SalesPartnerCommissions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CommissionPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.InvoicedAmount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CommissionAmount).HasColumnType("decimal(18,4)");
+        });
+
+        modelBuilder.Entity<DunningNotice>(entity =>
+        {
+            entity.ToTable("DunningNotices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.OutstandingAmount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DunningFee).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.InterestAmount).HasColumnType("decimal(18,4)");
         });
     }
 }

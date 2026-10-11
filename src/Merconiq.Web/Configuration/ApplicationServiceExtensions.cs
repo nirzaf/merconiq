@@ -73,6 +73,12 @@ public static class ApplicationServiceExtensions
         services.AddScoped<IPriceListService, Merconiq.Infrastructure.Services.PriceListService>();
         services.AddScoped<ILandedCostService, Merconiq.Infrastructure.Services.LandedCostService>();
         services.AddScoped<IProcurementRequisitionService, Merconiq.Infrastructure.Services.ProcurementRequisitionService>();
+        services.AddScoped<ISerialNumberService, Merconiq.Infrastructure.Services.SerialNumberService>();
+        services.AddScoped<IFifoValuationService, Merconiq.Infrastructure.Services.FifoValuationService>();
+        services.AddScoped<IAutoReorderService, Merconiq.Infrastructure.Services.AutoReorderService>();
+        services.AddScoped<IShopFloorService, Merconiq.Infrastructure.Services.ShopFloorService>();
+        services.AddScoped<IBankingFeedService, Merconiq.Infrastructure.Services.BankingFeedService>();
+        services.AddScoped<ICommercialLifecycleService, Merconiq.Infrastructure.Services.CommercialLifecycleService>();
 
         services.AddOptions<ForecastingOptions>()
             .Bind(configuration.GetSection(ForecastingOptions.SectionName))
