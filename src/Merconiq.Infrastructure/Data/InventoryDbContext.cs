@@ -210,6 +210,23 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<PortalContact> PortalContacts { get; set; } = null!;
     public DbSet<SupplierCollaborationEntry> SupplierCollaborationEntries { get; set; } = null!;
 
+    /// <summary>Price lists, item prices and promotional pricing rules.</summary>
+    public DbSet<PriceList> PriceLists { get; set; } = null!;
+    public DbSet<ItemPrice> ItemPrices { get; set; } = null!;
+    public DbSet<PricingRule> PricingRules { get; set; } = null!;
+
+    /// <summary>Landed cost vouchers and item charge allocations.</summary>
+    public DbSet<LandedCostVoucher> LandedCostVouchers { get; set; } = null!;
+    public DbSet<LandedCostReceipt> LandedCostReceipts { get; set; } = null!;
+    public DbSet<LandedCostCharge> LandedCostCharges { get; set; } = null!;
+    public DbSet<LandedCostItemAllocation> LandedCostItemAllocations { get; set; } = null!;
+
+    /// <summary>Material requisitions and supplier quotations.</summary>
+    public DbSet<MaterialRequest> MaterialRequests { get; set; } = null!;
+    public DbSet<MaterialRequestLine> MaterialRequestLines { get; set; } = null!;
+    public DbSet<SupplierQuotation> SupplierQuotations { get; set; } = null!;
+    public DbSet<SupplierQuotationLine> SupplierQuotationLines { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -3248,6 +3265,114 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
             entity.Property(e => e.InvoiceAmount).HasColumnType("decimal(18,4)");
             entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.SupplierId, e.PurchaseOrderId });
+        });
+
+        modelBuilder.Entity<PriceList>(entity =>
+        {
+            entity.ToTable("PriceLists");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.Name }).IsUnique();
+        });
+
+        modelBuilder.Entity<ItemPrice>(entity =>
+        {
+            entity.ToTable("ItemPrices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Rate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.MinQuantity).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.PriceListId, e.ItemId });
+        });
+
+        modelBuilder.Entity<PricingRule>(entity =>
+        {
+            entity.ToTable("PricingRules");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.MinQuantity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.MinAmount).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.RuleType });
+        });
+
+        modelBuilder.Entity<LandedCostVoucher>(entity =>
+        {
+            entity.ToTable("LandedCostVouchers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.VoucherNumber).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.TotalAdditionalCharges).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.VoucherNumber }).IsUnique();
+        });
+
+        modelBuilder.Entity<LandedCostReceipt>(entity =>
+        {
+            entity.ToTable("LandedCostReceipts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.LandedCostVoucherId, e.GoodsReceiptId });
+        });
+
+        modelBuilder.Entity<LandedCostCharge>(entity =>
+        {
+            entity.ToTable("LandedCostCharges");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.Description).HasMaxLength(256).IsRequired();
+        });
+
+        modelBuilder.Entity<LandedCostItemAllocation>(entity =>
+        {
+            entity.ToTable("LandedCostItemAllocations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ApplicableCharges).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.LandedCostVoucherId, e.GoodsReceiptLineId });
+        });
+
+        modelBuilder.Entity<MaterialRequest>(entity =>
+        {
+            entity.ToTable("MaterialRequests");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.RequestNumber).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.RequestedBy).HasMaxLength(128).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.RequestNumber }).IsUnique();
+        });
+
+        modelBuilder.Entity<MaterialRequestLine>(entity =>
+        {
+            entity.ToTable("MaterialRequestLines");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.MaterialRequestId, e.ItemId });
+        });
+
+        modelBuilder.Entity<SupplierQuotation>(entity =>
+        {
+            entity.ToTable("SupplierQuotations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.QuotationNumber).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.QuotationNumber }).IsUnique();
+        });
+
+        modelBuilder.Entity<SupplierQuotationLine>(entity =>
+        {
+            entity.ToTable("SupplierQuotationLines");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Rate).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,4)");
+            entity.HasIndex(e => new { e.TenantId, e.SupplierQuotationId, e.ItemId });
         });
     }
 }

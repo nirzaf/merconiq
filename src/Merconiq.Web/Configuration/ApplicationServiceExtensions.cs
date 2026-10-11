@@ -70,6 +70,9 @@ public static class ApplicationServiceExtensions
         services.AddScoped<IIntercompanyService, Merconiq.Infrastructure.Services.IntercompanyService>();
         services.AddScoped<IStatutoryTaxService, Merconiq.Infrastructure.Services.StatutoryTaxService>();
         services.AddScoped<IPortalService, Merconiq.Infrastructure.Services.PortalService>();
+        services.AddScoped<IPriceListService, Merconiq.Infrastructure.Services.PriceListService>();
+        services.AddScoped<ILandedCostService, Merconiq.Infrastructure.Services.LandedCostService>();
+        services.AddScoped<IProcurementRequisitionService, Merconiq.Infrastructure.Services.ProcurementRequisitionService>();
 
         services.AddOptions<ForecastingOptions>()
             .Bind(configuration.GetSection(ForecastingOptions.SectionName))
