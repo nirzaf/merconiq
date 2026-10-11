@@ -109,7 +109,8 @@ public sealed class JournalsController(
                 request.SourceVersion,
                 request.Lines
                     .Select(line => new JournalLineInput(line.ChartOfAccountId, line.Description, line.Debit, line.Credit))
-                    .ToArray()),
+                    .ToArray(),
+                request.FiscalPeriodId),
             actor,
             cancellationToken);
         return Ok(ApiResponse<JournalPostingResponse>.CreateSuccess(ToPostingResponse(result)));
@@ -226,6 +227,12 @@ public sealed class JournalPostRequest
 
     [Range(1, int.MaxValue)]
     public int SourceVersion { get; init; } = 1;
+
+    /// <summary>
+    /// Optional year-end adjustment period to post into. Omit for regular posting by date; when set,
+    /// PostingDate must be that fiscal year's last day and the adjustment period must be open.
+    /// </summary>
+    public int? FiscalPeriodId { get; init; }
 
     [MinLength(2), MaxLength(500)]
     public IReadOnlyList<JournalLineWriteRequest> Lines { get; init; } = [];

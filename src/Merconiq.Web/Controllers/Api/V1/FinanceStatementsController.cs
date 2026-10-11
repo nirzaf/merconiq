@@ -44,7 +44,8 @@ public sealed class FinanceStatementsController(
             statement.Expenses.Select(ToLine).ToArray(),
             statement.TotalIncome,
             statement.TotalExpenses,
-            statement.NetProfit)));
+            statement.NetProfit,
+            statement.Rollups.Select(ToRollup).ToArray())));
     }
 
     /// <summary>Balance sheet as of a date, including retained profit; must balance.</summary>
@@ -69,15 +70,38 @@ public sealed class FinanceStatementsController(
             statement.TotalLiabilities,
             statement.TotalEquity,
             statement.NetProfit,
-            statement.Balances)));
+            statement.Balances,
+            statement.Rollups.Select(ToRollup).ToArray())));
     }
 
     private static StatementLineResponse ToLine(StatementLine line) => new(
         line.ChartOfAccountId, line.AccountCode, line.AccountName, line.Amount);
+
+    private static StatementRollupResponse ToRollup(StatementRollupLine line) => new(
+        line.ChartOfAccountId,
+        line.AccountCode,
+        line.AccountName,
+        line.AccountClass.ToString(),
+        line.ParentChartOfAccountId,
+        line.Depth,
+        line.Amount);
 }
 
 public sealed record StatementLineResponse(
     int ChartOfAccountId, string AccountCode, string AccountName, decimal Amount);
+
+/// <summary>
+/// Classified group account with the balance of its posted descendants in the same class.
+/// Depth 0 is a top-level group; rows are subtotals and never represent postings themselves.
+/// </summary>
+public sealed record StatementRollupResponse(
+    int ChartOfAccountId,
+    string AccountCode,
+    string AccountName,
+    string AccountClass,
+    int? ParentChartOfAccountId,
+    int Depth,
+    decimal Amount);
 
 public sealed record ProfitAndLossResponse(
     int CompanyId,
@@ -87,7 +111,8 @@ public sealed record ProfitAndLossResponse(
     IReadOnlyList<StatementLineResponse> Expenses,
     decimal TotalIncome,
     decimal TotalExpenses,
-    decimal NetProfit);
+    decimal NetProfit,
+    IReadOnlyList<StatementRollupResponse> Rollups);
 
 public sealed record BalanceSheetResponse(
     int CompanyId,
@@ -99,4 +124,5 @@ public sealed record BalanceSheetResponse(
     decimal TotalLiabilities,
     decimal TotalEquity,
     decimal NetProfit,
-    bool Balances);
+    bool Balances,
+    IReadOnlyList<StatementRollupResponse> Rollups);

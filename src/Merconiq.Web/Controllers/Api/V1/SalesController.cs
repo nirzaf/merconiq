@@ -134,6 +134,9 @@ public sealed class SalesController(
         if (requestKey is null)
             return BadRequest(ApiResponse<object>.CreateFailure(
                 "Idempotency-Key is required for sales-invoice posting."));
+        if (request.OverrideCreditLimit &&
+            !await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.Approve))
+            return Forbid();
 
         var result = await sales.PostSalesInvoiceAsync(
             new PostSalesInvoiceRequest(
@@ -145,7 +148,9 @@ public sealed class SalesController(
                 requestKey,
                 request.Lines.Select(line => new PostSalesInvoiceLine(line.DeliveryNoteLineId)).ToArray(),
                 request.PostingDate,
-                request.Notes),
+                request.Notes,
+                request.OverrideCreditLimit,
+                request.CreditOverrideReason),
             actor,
             cancellationToken);
         return Ok(ApiResponse<SalesInvoicePostResponse>.CreateSuccess(new SalesInvoicePostResponse(
@@ -407,6 +412,15 @@ public sealed class PostSalesInvoiceWriteRequest
 
     [StringLength(500)]
     public string? Notes { get; init; }
+
+    /// <summary>
+    /// Approves an invoice above the customer's credit limit. Requires the Approve capability; the
+    /// reason is mandatory whenever the override is actually used.
+    /// </summary>
+    public bool OverrideCreditLimit { get; init; }
+
+    [StringLength(500)]
+    public string? CreditOverrideReason { get; init; }
 
     [MinLength(1), MaxLength(200)]
     public IReadOnlyList<SalesInvoiceLineWriteRequest> Lines { get; init; } = [];

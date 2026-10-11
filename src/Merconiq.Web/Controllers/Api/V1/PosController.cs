@@ -180,7 +180,8 @@ public sealed class PosController(
             result.ExpectedCash,
             result.CountedCash,
             result.OverShortValue,
-            result.OverShortJournalNumber)));
+            result.OverShortJournalNumber,
+            result.ApprovalRequired)));
     }
 
     private string? RequireActor() =>
@@ -310,4 +311,5 @@ public sealed record PosRefundPostResponse(
 
 public sealed record PosShiftCloseResponse(
     int PosShiftId, decimal OpeningFloat, decimal CashSales, decimal CashRefunds,
-    decimal ExpectedCash, decimal CountedCash, decimal OverShortValue, string? OverShortJournalNumber);
+    decimal ExpectedCash, decimal CountedCash, decimal OverShortValue, string? OverShortJournalNumber,
+    bool ApprovalRequired = false);

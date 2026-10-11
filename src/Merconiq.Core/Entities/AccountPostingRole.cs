@@ -19,5 +19,11 @@ public enum AccountPostingRole
     Rounding = 9,
     OpeningEquity = 10,
     StockInTransit = 11,
-    CashOverShort = 12
+    CashOverShort = 12,
+    FixedAssets = 13,
+    AccumulatedDepreciation = 14,
+    DepreciationExpense = 15,
+    GainOnDisposal = 16,
+    LossOnDisposal = 17,
+    EmployeeExpensesPayable = 18
 }

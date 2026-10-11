@@ -17,5 +17,11 @@ public enum PaymentEntryType
 public enum PaymentMethod
 {
     BankTransfer = 0,
-    Cash = 1
+    Cash = 1,
+
+    /// <summary>
+    /// Card tender. Posts to the bank control account like a bank transfer; it is matched to the
+    /// acquirer's settlement batches by the card settlement reconciliation.
+    /// </summary>
+    Card = 2
 }

@@ -24,6 +24,13 @@ public sealed class FiscalPeriod : AuditableEntity
     /// <summary>Inclusive last calendar day of the period.</summary>
     public DateOnly EndDate { get; set; }
 
+    /// <summary>
+    /// Whether this is the year-end adjustment period (period 13). Adjustment periods share the fiscal
+    /// year's last day, never claim a posting date on their own, and accept only journals explicitly
+    /// targeted at them, so year-end corrections can post after the regular December period closes.
+    /// </summary>
+    public bool IsAdjustment { get; set; }
+
     public FiscalPeriodStatus Status { get; set; } = FiscalPeriodStatus.Open;
 
     public DateTime? ClosedAtUtc { get; set; }

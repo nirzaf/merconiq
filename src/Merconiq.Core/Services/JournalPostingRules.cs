@@ -97,6 +97,9 @@ public static class JournalPostingRules
         AppendField(canonical, request.SourceDocumentId);
         AppendField(canonical, request.SourceAction);
         AppendField(canonical, request.SourceVersion.ToString(CultureInfo.InvariantCulture));
+        // Appended only when targeted, so hashes of regular journals stay identical to committed history.
+        if (request.FiscalPeriodId is int targetPeriodId)
+            AppendField(canonical, "adjustment-period:" + targetPeriodId.ToString(CultureInfo.InvariantCulture));
         foreach (var line in request.Lines)
         {
             AppendField(canonical, line.ChartOfAccountId.ToString(CultureInfo.InvariantCulture));

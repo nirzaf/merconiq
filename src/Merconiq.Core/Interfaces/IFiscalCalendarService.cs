@@ -40,6 +40,27 @@ public interface IFiscalCalendarService
         DateOnly postingDate,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Creates the year-end adjustment period (period 13) for one fiscal year. Only one adjustment period
+    /// may exist per year, and it covers the year's last day without claiming that day from the regular period.
+    /// </summary>
+    Task<FiscalPeriod> CreateAdjustmentPeriodAsync(
+        int companyId,
+        int fiscalYearId,
+        string actor,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the open adjustment period when a journal explicitly targets it and its posting date is the
+    /// fiscal year end; throws <see cref="Exceptions.FinancePostingValidationException"/> otherwise.
+    /// Runs inside the posting transaction, like <see cref="EnsurePeriodOpenForDateAsync"/>.
+    /// </summary>
+    Task<FiscalPeriod> EnsureAdjustmentPeriodOpenAsync(
+        int companyId,
+        int adjustmentPeriodId,
+        DateOnly postingDate,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Lists the company's fiscal years with their ordered periods.</summary>
     Task<IReadOnlyList<FiscalYear>> ListFiscalYearsAsync(
         int companyId,

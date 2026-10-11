@@ -71,10 +71,14 @@ rollback remain in force. Reports and adapters may read authorized application
 results; they must not write another module's ledger or bypass the posting
 service with direct `DbContext` writes. Never infer a general-ledger posting
 from an inventory valuation entry. The general-ledger journal model exists
-(`JournalEntry`, `JournalLine`) behind `IJournalPostingService`, and the
-procurement and sales posting services are its only writers. Only those
-services may write journal rows, stock rows, receipts, invoices or payments;
-direct `DbContext` writes to posted records are blocked by append-only guards.
+(`JournalEntry`, `JournalLine`) behind `IJournalPostingService`. Its only
+writers are the finance posting adapters listed in `docs/FINANCE_POSTING.md`
+(procurement, sales, payments, POS, fixed assets, expense claims and till
+approval), which reach the ledger through that kernel. Only those services may
+write journal rows, stock rows, receipts, invoices or payments; direct
+`DbContext` writes to posted records are blocked by append-only guards.
+Reconciliation, CRM, card settlement and statement services read ledger or
+pipeline state and never write journals.
 
 ## Existing compile-time seams (limited, not a plugin API)
 

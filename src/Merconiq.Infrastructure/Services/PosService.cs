@@ -238,6 +238,9 @@ public sealed class PosService(
                 ?? throw new FinancePostingValidationException("Shift not found in this company.");
             if (shift.Status == PosShiftStatus.Closed)
                 throw new FinancePostingConflictException("The shift is already closed.");
+            if (shift.Status == PosShiftStatus.PendingApproval)
+                throw new FinancePostingConflictException(
+                    "The shift close is awaiting approval; approve or reject that close instead.");
 
             var saleIds = await context.PosSales
                 .Where(sale => sale.ShiftId == shift.Id)
@@ -257,6 +260,28 @@ public sealed class PosService(
 
             var expectedCash = shift.OpeningFloat + cashSales - cashRefunds;
             var overShort = decimal.Round(request.CountedCash - expectedCash, 6, MidpointRounding.AwayFromZero);
+
+            // A variance above the register's threshold is held for a reviewer; nothing posts until approval,
+            // and the counted cash, expected cash and variance are recorded now as the basis for that review.
+            if (shift.Register.VarianceApprovalThreshold is { } approvalThreshold &&
+                Math.Abs(overShort) > approvalThreshold)
+            {
+                shift.Status = PosShiftStatus.PendingApproval;
+                shift.ClosedAtUtc = DateTime.UtcNow;
+                shift.ClosedBy = actor.Trim();
+                shift.CountedCash = request.CountedCash;
+                shift.ExpectedCash = expectedCash;
+                shift.OverShortValue = overShort;
+                await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
+
+                logger.LogInformation(
+                    "POS shift {ShiftId} close held for approval: variance {OverShort} exceeds threshold {Threshold}",
+                    shift.Id, overShort, approvalThreshold);
+                result = new PosShiftCloseResult(
+                    shift.Id, shift.OpeningFloat, cashSales, cashRefunds, expectedCash, request.CountedCash,
+                    overShort, null, ApprovalRequired: true);
+                return;
+            }
 
             string? overShortJournal = null;
             if (overShort != 0)
@@ -652,7 +677,7 @@ public sealed class PosService(
         return new PosRefundResult(refund.Id, refundTotal, restockedValue, Replayed: false);
     }
 
-    private static JournalLineInput[] BuildOverShortLines(
+    internal static JournalLineInput[] BuildOverShortLines(
         int overShortAccountId, int cashAccountId, decimal overShort) =>
         overShort < 0
             ?

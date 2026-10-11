@@ -2,6 +2,7 @@ using Merconiq.Core.Entities;
 using Merconiq.Core.Exceptions;
 using Merconiq.Core.Interfaces;
 using Merconiq.Core.Models;
+using Merconiq.Core.Services;
 using Merconiq.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,11 +11,15 @@ namespace Merconiq.Infrastructure.Services;
 /// <summary>
 /// Builds the income statement and balance sheet directly from posted ledger lines joined to
 /// classified chart accounts. Statements are pure read projections: no mutable totals, no
-/// unclassified accounts, and the balance sheet fails loudly if it does not balance.
+/// unclassified accounts, and the balance sheet fails loudly if it does not balance. Group
+/// accounts carry hierarchy rollups computed from the same posted lines.
 /// </summary>
 public sealed class FinanceStatementService(
     InventoryDbContext context) : IFinanceStatementService
 {
+    private static readonly AccountClass[] IncomeStatementClasses = [AccountClass.Income, AccountClass.Expense];
+    private static readonly AccountClass[] BalanceSheetClasses = [AccountClass.Asset, AccountClass.Liability, AccountClass.Equity];
+
     /// <inheritdoc />
     public async Task<ProfitAndLossStatement> GetProfitAndLossAsync(
         int companyId,
@@ -37,9 +42,11 @@ public sealed class FinanceStatementService(
         var expenses = Aggregate(windowed, AccountClass.Expense, creditPositive: false);
         var totalIncome = income.Sum(line => line.Amount);
         var totalExpenses = expenses.Sum(line => line.Amount);
+        var hierarchy = await QueryAccountHierarchyAsync(companyId, cancellationToken);
+        var rollups = StatementRollupCalculator.Build(hierarchy, SignedPostings(windowed), IncomeStatementClasses);
         return new ProfitAndLossStatement(
             companyId, fromDate, toDate, income, expenses, totalIncome, totalExpenses,
-            totalIncome - totalExpenses);
+            totalIncome - totalExpenses, rollups);
     }
 
     /// <inheritdoc />
@@ -77,9 +84,11 @@ public sealed class FinanceStatementService(
                 $"assets {totalAssets}, liabilities {totalLiabilities}, equity {totalEquity}, profit {netProfit}.");
         }
 
+        var hierarchy = await QueryAccountHierarchyAsync(companyId, cancellationToken);
+        var rollups = StatementRollupCalculator.Build(hierarchy, SignedPostings(asOf), BalanceSheetClasses);
         return new BalanceSheetStatement(
             companyId, asOfDate, assets, liabilities, equity,
-            totalAssets, totalLiabilities, totalEquity, netProfit, balances);
+            totalAssets, totalLiabilities, totalEquity, netProfit, balances, rollups);
     }
 
     private async Task<List<LedgerRow>> QueryClassifiedRowsAsync(
@@ -102,6 +111,20 @@ public sealed class FinanceStatementService(
                 })
             .ToListAsync(cancellationToken);
 
+    private async Task<List<StatementAccountNode>> QueryAccountHierarchyAsync(
+        int companyId,
+        CancellationToken cancellationToken) =>
+        await context.ChartOfAccounts
+            .Where(account => account.CompanyId == companyId)
+            .Select(account => new StatementAccountNode(
+                account.Id,
+                account.AccountCode,
+                account.Name,
+                account.ParentAccountId,
+                account.IsGroupAccount,
+                account.AccountClass))
+            .ToListAsync(cancellationToken);
+
     private static List<StatementLine> Aggregate(
         IReadOnlyList<LedgerRow> rows,
         AccountClass accountClass,
@@ -114,6 +137,17 @@ public sealed class FinanceStatementService(
                 group.Key.AccountName,
                 group.Sum(row => creditPositive ? row.Credit - row.Debit : row.Debit - row.Credit)))
             .OrderBy(line => line.AccountCode)
+            .ToList();
+
+    /// <summary>Projects classified lines to normal-balance amounts; rollups sum these per group.</summary>
+    private static List<StatementPostingRow> SignedPostings(IReadOnlyList<LedgerRow> rows) =>
+        rows.Where(row => row.Class is not null)
+            .Select(row => new StatementPostingRow(
+                row.AccountId,
+                row.Class!.Value,
+                row.Class!.Value is AccountClass.Asset or AccountClass.Expense
+                    ? row.Debit - row.Credit
+                    : row.Credit - row.Debit))
             .ToList();
 
     private static void RequireClassified(IReadOnlyList<LedgerRow> rows, string statement)

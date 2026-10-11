@@ -5,6 +5,7 @@ using Merconiq.Core.Entities;
 using Merconiq.Core.Exceptions;
 using Merconiq.Core.Interfaces;
 using Merconiq.Core.Models;
+using Merconiq.Core.Services;
 using Merconiq.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -834,6 +835,7 @@ public sealed class SalesService(
                 .ToList()
         };
         invoice.TotalValue = invoice.Lines.Sum(line => line.RevenueValue);
+        await EnforceCreditLimitAsync(request, customer, invoice, actor, cancellationToken);
 
         context.SalesInvoices.Add(invoice);
         await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
@@ -933,6 +935,40 @@ public sealed class SalesService(
                 throw new FinancePostingValidationException(
                     "Every delivery line needs a positive order-line id and quantity.");
         }
+    }
+
+    /// <summary>
+    /// Blocks an invoice that would take the customer's open receivable above the credit limit unless a
+    /// reviewer supplies an override with a reason. The override is kept on the invoice for audit. The company
+    /// credit lock serializes this check with limit changes and with other invoices for the same company.
+    /// </summary>
+    private async Task EnforceCreditLimitAsync(
+        PostSalesInvoiceRequest request,
+        Customer customer,
+        SalesInvoice invoice,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (customer.CreditLimit is null)
+            return;
+
+        await unitOfWork.AcquireTenantOperationLockAsync($"customer-credit:{request.CompanyId}", cancellationToken);
+        var open = await CustomerReceivableExposure.OpenReceivableAsync(
+            context, request.CompanyId, customer.Id, cancellationToken);
+        var projected = open + invoice.TotalValue;
+        if (!CustomerCreditRules.WouldExceed(customer.CreditLimit, projected))
+            return;
+
+        if (!request.OverrideCreditLimit)
+            throw new FinancePostingConflictException(
+                $"Invoice {invoice.InvoiceNumber} would take customer {customer.CustomerCode} to {projected:F2} open against a credit limit of {customer.CreditLimit.Value:F2}; a reviewer may approve it with an override and a reason.");
+
+        var reason = request.CreditOverrideReason?.Trim();
+        if (string.IsNullOrEmpty(reason) || reason.Length > 500)
+            throw new FinancePostingValidationException(
+                "A credit-limit override needs a reason of 1 to 500 characters.");
+        invoice.CreditLimitOverrideReason = reason;
+        invoice.CreditLimitOverrideBy = actor.Trim();
     }
 
     private static void ValidateInvoiceRequest(PostSalesInvoiceRequest request)
