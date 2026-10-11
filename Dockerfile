@@ -30,7 +30,7 @@ RUN mkdir -p /app/logs
 RUN mkdir -p /app/data/keys
 
 # === Runtime Stage ===
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.11 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12 AS runtime
 WORKDIR /app
 
 # Copy published files with ownership set to the built-in 'app' user (UID 1654)
