@@ -69,6 +69,10 @@ jobs:
         run: bash scripts/validate-release-workflows.sh
 
       - name: Test with coverage
+        env:
+          # Relational integration tests must count toward the coverage gate; the
+          # finance posting services are proven by PostgreSQL suites only.
+          RUN_POSTGRES_TESTS: "true"
         run: |
           dotnet test --no-build --configuration Release \
             --verbosity normal \

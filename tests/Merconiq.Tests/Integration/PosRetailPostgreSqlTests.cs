@@ -22,6 +22,7 @@ namespace Merconiq.Tests.Integration;
 /// Requires RUN_POSTGRES_TESTS=true.
 /// </summary>
 [Collection(PostgreSqlIntegrationCollection.Name)]
+[Trait("Category", "PostgreSQL")]
 public sealed class PosRetailPostgreSqlTests
 {
     private const string Actor = "pos-tester";

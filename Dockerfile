@@ -1,5 +1,5 @@
 # === Build Stage ===
-FROM mcr.microsoft.com/dotnet/sdk:10.0.300 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401 AS build
 WORKDIR /src
 
 # Copy solution and project files for layer caching
@@ -30,7 +30,7 @@ RUN mkdir -p /app/logs
 RUN mkdir -p /app/data/keys
 
 # === Runtime Stage ===
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.11 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12 AS runtime
 WORKDIR /app
 
 # Copy published files with ownership set to the built-in 'app' user (UID 1654)
