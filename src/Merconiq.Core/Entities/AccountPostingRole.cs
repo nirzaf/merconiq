@@ -27,5 +27,6 @@ public enum AccountPostingRole
     LossOnDisposal = 17,
     EmployeeExpensesPayable = 18,
     SalaryExpense = 19,
-    DeductionsPayable = 20
+    DeductionsPayable = 20,
+    WorkInProgress = 21
 }

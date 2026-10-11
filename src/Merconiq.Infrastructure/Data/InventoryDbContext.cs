@@ -188,6 +188,12 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<PayRun> PayRuns { get; set; } = null!;
     public DbSet<Payslip> Payslips { get; set; } = null!;
 
+    /// <summary>Manufacturing: BOMs, work orders and component consumption.</summary>
+    public DbSet<BillOfMaterials> BillOfMaterials { get; set; } = null!;
+    public DbSet<BillOfMaterialsLine> BillOfMaterialsLines { get; set; } = null!;
+    public DbSet<WorkOrder> WorkOrders { get; set; } = null!;
+    public DbSet<WorkOrderConsumption> WorkOrderConsumptions { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -3057,6 +3063,102 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne<Company>()
                 .WithMany()
                 .HasForeignKey(slip => new { slip.CompanyId, slip.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BillOfMaterials>(entity =>
+        {
+            entity.HasQueryFilter(bom => bom.TenantId == CurrentTenantId);
+            entity.Property(bom => bom.TenantId).HasMaxLength(64).IsRequired();
+            entity.HasAlternateKey(bom => new { bom.Id, bom.TenantId });
+            entity.HasIndex(bom => new { bom.TenantId, bom.CompanyId, bom.ItemId, bom.Version })
+                .IsUnique()
+                .HasDatabaseName("UX_BillOfMaterials_ItemVersion");
+            entity.HasOne(bom => bom.Item)
+                .WithMany()
+                .HasForeignKey(bom => bom.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(bom => new { bom.CompanyId, bom.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BillOfMaterialsLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.QuantityPerUnit).HasColumnType("decimal(18,6)");
+            entity.ToTable("BillOfMaterialsLines", table => table.HasCheckConstraint(
+                "CK_BillOfMaterialsLines_Quantity",
+                "\"QuantityPerUnit\" > 0"));
+            entity.HasIndex(line => new { line.TenantId, line.BillOfMaterialsId, line.LineNumber }).IsUnique();
+            entity.HasOne(line => line.BillOfMaterials)
+                .WithMany(bom => bom.Lines)
+                .HasForeignKey(line => new { line.BillOfMaterialsId, line.TenantId })
+                .HasPrincipalKey(bom => new { bom.Id, bom.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.ComponentItem)
+                .WithMany()
+                .HasForeignKey(line => line.ComponentItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkOrder>(entity =>
+        {
+            entity.HasQueryFilter(workOrder => workOrder.TenantId == CurrentTenantId);
+            entity.Property(workOrder => workOrder.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(workOrder => workOrder.WorkOrderNumber).HasMaxLength(50).IsRequired();
+            entity.Property(workOrder => workOrder.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(workOrder => workOrder.Notes).HasMaxLength(500);
+            entity.Property(workOrder => workOrder.ConsumedCost).HasColumnType("decimal(18,6)");
+            entity.Property(workOrder => workOrder.CompletedBy).HasMaxLength(256);
+            entity.HasAlternateKey(workOrder => new { workOrder.Id, workOrder.TenantId });
+            entity.HasIndex(workOrder => new { workOrder.TenantId, workOrder.CompanyId, workOrder.WorkOrderNumber })
+                .IsUnique();
+            entity.HasIndex(workOrder => new { workOrder.TenantId, workOrder.CompanyId, workOrder.Status });
+            entity.HasOne(workOrder => workOrder.BillOfMaterials)
+                .WithMany()
+                .HasForeignKey(workOrder => workOrder.BillOfMaterialsId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(workOrder => workOrder.Location)
+                .WithMany()
+                .HasForeignKey(workOrder => new { workOrder.LocationId, workOrder.TenantId })
+                .HasPrincipalKey(location => new { location.Id, location.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(workOrder => new { workOrder.CompanyId, workOrder.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkOrderConsumption>(entity =>
+        {
+            entity.HasQueryFilter(consumption => consumption.TenantId == CurrentTenantId);
+            entity.Property(consumption => consumption.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(consumption => consumption.ConsumedValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("WorkOrderConsumptions", table => table.HasCheckConstraint(
+                "CK_WorkOrderConsumptions_Quantity",
+                "\"Quantity\" > 0 AND \"ConsumedValue\" >= 0"));
+            entity.HasIndex(consumption => new { consumption.TenantId, consumption.WorkOrderId, consumption.ComponentItemId })
+                .IsUnique();
+            entity.HasIndex(consumption => new { consumption.TenantId, consumption.StockTransactionId }).IsUnique();
+            entity.HasOne(consumption => consumption.WorkOrder)
+                .WithMany(workOrder => workOrder.Consumptions)
+                .HasForeignKey(consumption => new { consumption.WorkOrderId, consumption.TenantId })
+                .HasPrincipalKey(workOrder => new { workOrder.Id, workOrder.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(consumption => new { consumption.CompanyId, consumption.TenantId })
                 .HasPrincipalKey(company => new { company.Id, company.TenantId })
                 .OnDelete(DeleteBehavior.Restrict);
         });

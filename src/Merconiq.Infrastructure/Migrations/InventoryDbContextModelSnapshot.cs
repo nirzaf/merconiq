@@ -413,6 +413,113 @@ namespace Merconiq.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Merconiq.Core.Entities.BillOfMaterials", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("CompanyId", "TenantId");
+
+                    b.HasIndex("TenantId", "CompanyId", "ItemId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BillOfMaterials_ItemVersion");
+
+                    b.ToTable("BillOfMaterials");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.BillOfMaterialsLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BillOfMaterialsId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ComponentItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("LineNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("QuantityPerUnit")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ComponentItemId");
+
+                    b.HasIndex("BillOfMaterialsId", "TenantId");
+
+                    b.HasIndex("CompanyId", "TenantId");
+
+                    b.HasIndex("TenantId", "BillOfMaterialsId", "LineNumber")
+                        .IsUnique();
+
+                    b.ToTable("BillOfMaterialsLines", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_BillOfMaterialsLines_Quantity", "\"QuantityPerUnit\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("Merconiq.Core.Entities.Branch", b =>
                 {
                     b.Property<int>("Id")
@@ -6679,6 +6786,153 @@ namespace Merconiq.Infrastructure.Migrations
                     b.ToTable("WebhookSubscriptions");
                 });
 
+            modelBuilder.Entity("Merconiq.Core.Entities.WorkOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BillOfMaterialsId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BomVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CompletedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<decimal>("ConsumedCost")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateOnly>("PostingDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkOrderNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BillOfMaterialsId");
+
+                    b.HasIndex("CompanyId", "TenantId");
+
+                    b.HasIndex("LocationId", "TenantId");
+
+                    b.HasIndex("TenantId", "CompanyId", "Status");
+
+                    b.HasIndex("TenantId", "CompanyId", "WorkOrderNumber")
+                        .IsUnique();
+
+                    b.ToTable("WorkOrders");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.WorkOrderConsumption", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ComponentItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("ConsumedValue")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StockTransactionId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "TenantId");
+
+                    b.HasIndex("TenantId", "StockTransactionId")
+                        .IsUnique();
+
+                    b.HasIndex("WorkOrderId", "TenantId");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "ComponentItemId")
+                        .IsUnique();
+
+                    b.ToTable("WorkOrderConsumptions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkOrderConsumptions_Quantity", "\"Quantity\" > 0 AND \"ConsumedValue\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
                     b.Property<string>("Id")
@@ -6878,6 +7132,51 @@ namespace Merconiq.Infrastructure.Migrations
                     b.Navigation("BankStatementLine");
 
                     b.Navigation("JournalLine");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.BillOfMaterials", b =>
+                {
+                    b.HasOne("Merconiq.Core.Entities.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Merconiq.Core.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.BillOfMaterialsLine", b =>
+                {
+                    b.HasOne("Merconiq.Core.Entities.Item", "ComponentItem")
+                        .WithMany()
+                        .HasForeignKey("ComponentItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Merconiq.Core.Entities.BillOfMaterials", "BillOfMaterials")
+                        .WithMany("Lines")
+                        .HasForeignKey("BillOfMaterialsId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Merconiq.Core.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BillOfMaterials");
+
+                    b.Navigation("ComponentItem");
                 });
 
             modelBuilder.Entity("Merconiq.Core.Entities.Branch", b =>
@@ -8582,6 +8881,52 @@ namespace Merconiq.Infrastructure.Migrations
                     b.Navigation("DocumentLineIdentity");
                 });
 
+            modelBuilder.Entity("Merconiq.Core.Entities.WorkOrder", b =>
+                {
+                    b.HasOne("Merconiq.Core.Entities.BillOfMaterials", "BillOfMaterials")
+                        .WithMany()
+                        .HasForeignKey("BillOfMaterialsId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Merconiq.Core.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Merconiq.Core.Entities.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BillOfMaterials");
+
+                    b.Navigation("Location");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.WorkOrderConsumption", b =>
+                {
+                    b.HasOne("Merconiq.Core.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Merconiq.Core.Entities.WorkOrder", "WorkOrder")
+                        .WithMany("Consumptions")
+                        .HasForeignKey("WorkOrderId", "TenantId")
+                        .HasPrincipalKey("Id", "TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -8639,6 +8984,11 @@ namespace Merconiq.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("Merconiq.Core.Entities.BankStatement", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.BillOfMaterials", b =>
                 {
                     b.Navigation("Lines");
                 });
@@ -8802,6 +9152,11 @@ namespace Merconiq.Infrastructure.Migrations
             modelBuilder.Entity("Merconiq.Core.Entities.TransferOrder", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Merconiq.Core.Entities.WorkOrder", b =>
+                {
+                    b.Navigation("Consumptions");
                 });
 #pragma warning restore 612, 618
         }
