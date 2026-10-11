@@ -49,6 +49,12 @@ public sealed class JournalEntry : AuditableEntity
     /// <summary>Mandatory reviewer reason carried on reversal journals.</summary>
     public string? ReversalReason { get; set; }
 
+    /// <summary>
+    /// The year-end adjustment period this journal was explicitly targeted at; null for journals that
+    /// map to their regular fiscal period by posting date. Reversals inherit the original target.
+    /// </summary>
+    public int? FiscalPeriodId { get; set; }
+
     public DateTime PostedAtUtc { get; set; }
 
     public string PostedBy { get; set; } = string.Empty;

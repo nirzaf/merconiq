@@ -32,6 +32,19 @@ public sealed class Customer : AuditableEntity
     /// </summary>
     public int? PaymentTermDays { get; set; }
 
+    /// <summary>
+    /// Maximum open receivable allowed for this customer in base currency. Null means no limit; a sales
+    /// invoice that would exceed the limit needs a reviewer override with a recorded reason.
+    /// </summary>
+    public decimal? CreditLimit { get; set; }
+
+    /// <summary>Reviewer's reason for the most recent credit-limit change.</summary>
+    public string? CreditLimitChangeReason { get; set; }
+
+    public string? CreditLimitChangedBy { get; set; }
+
+    public DateTime? CreditLimitChangedAtUtc { get; set; }
+
     /// <summary>Whether this customer may be selected for future sales documents.</summary>
     public bool IsActive { get; set; } = true;
 

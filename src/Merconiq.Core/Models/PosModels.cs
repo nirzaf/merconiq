@@ -62,4 +62,5 @@ public sealed record PosShiftCloseResult(
     decimal ExpectedCash,
     decimal CountedCash,
     decimal OverShortValue,
-    string? OverShortJournalNumber);
+    string? OverShortJournalNumber,
+    bool ApprovalRequired = false);

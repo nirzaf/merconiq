@@ -114,6 +114,18 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     /// <summary>Company-owned fiscal-year calendars gating financial posting dates.</summary>
     public DbSet<FiscalYear> FiscalYears { get; set; } = null!;
     public DbSet<FiscalPeriod> FiscalPeriods { get; set; } = null!;
+    public DbSet<FiscalPeriodAccountLock> FiscalPeriodAccountLocks { get; set; } = null!;
+    public DbSet<BankStatement> BankStatements { get; set; } = null!;
+    public DbSet<BankStatementLine> BankStatementLines { get; set; } = null!;
+    public DbSet<BankStatementMatch> BankStatementMatches { get; set; } = null!;
+    public DbSet<FixedAsset> FixedAssets { get; set; } = null!;
+    public DbSet<CardSettlementBatch> CardSettlementBatches { get; set; } = null!;
+    public DbSet<CardSettlementMatch> CardSettlementMatches { get; set; } = null!;
+    public DbSet<ExpenseClaim> ExpenseClaims { get; set; } = null!;
+    public DbSet<ExpenseClaimLine> ExpenseClaimLines { get; set; } = null!;
+    public DbSet<CrmLead> CrmLeads { get; set; } = null!;
+    public DbSet<CrmOpportunity> CrmOpportunities { get; set; } = null!;
+    public DbSet<CrmActivity> CrmActivities { get; set; } = null!;
 
     /// <summary>Posted, immutable general-ledger journals and their lines.</summary>
     public DbSet<JournalEntry> JournalEntries { get; set; } = null!;
@@ -626,6 +638,13 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(e => e.BillingAddress).HasMaxLength(500);
             entity.Property(e => e.ShippingAddress).HasMaxLength(500);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreditLimit).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.CreditLimitChangeReason).HasMaxLength(500);
+            entity.Property(e => e.CreditLimitChangedBy).HasMaxLength(256);
+            entity.HasAlternateKey(e => new { e.Id, e.CompanyId, e.TenantId });
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_Customers_CreditLimit",
+                "\"CreditLimit\" IS NULL OR \"CreditLimit\" >= 0"));
             entity.HasAlternateKey(e => new { e.Id, e.TenantId });
             entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.CustomerCode })
                 .IsUnique()
@@ -1637,11 +1656,18 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(period => period.ClosedBy).HasMaxLength(256);
             entity.Property(period => period.ReopenedBy).HasMaxLength(256);
             entity.Property(period => period.ReopenReason).HasMaxLength(500);
+            entity.HasAlternateKey(period => new { period.Id, period.CompanyId, period.TenantId });
             entity.HasIndex(period => new { period.TenantId, period.FiscalYearId, period.PeriodNumber }).IsUnique();
             entity.HasIndex(period => new { period.TenantId, period.CompanyId, period.StartDate }).IsUnique();
-            entity.ToTable("FiscalPeriods", table => table.HasCheckConstraint(
-                "CK_FiscalPeriods_Range",
-                "\"EndDate\" >= \"StartDate\" AND \"PeriodNumber\" BETWEEN 1 AND 13 AND \"Name\" <> '' AND \"Name\" = btrim(\"Name\")"));
+            entity.ToTable("FiscalPeriods", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_FiscalPeriods_Range",
+                    "\"EndDate\" >= \"StartDate\" AND \"PeriodNumber\" BETWEEN 1 AND 13 AND \"Name\" <> '' AND \"Name\" = btrim(\"Name\")");
+                table.HasCheckConstraint(
+                    "CK_FiscalPeriods_Adjustment",
+                    "NOT \"IsAdjustment\" OR (\"PeriodNumber\" = 13 AND \"EndDate\" = \"StartDate\")");
+            });
             entity.HasOne(period => period.FiscalYear)
                 .WithMany(year => year.Periods)
                 .HasForeignKey(period => new { period.FiscalYearId, period.CompanyId, period.TenantId })
@@ -1651,6 +1677,383 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(period => new { period.CompanyId, period.TenantId })
                 .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FiscalPeriodAccountLock>(entity =>
+        {
+            entity.HasQueryFilter(entry => entry.TenantId == CurrentTenantId);
+            entity.Property(entry => entry.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.LockedBy).HasMaxLength(256).IsRequired();
+            entity.Property(entry => entry.LockReason).HasMaxLength(500).IsRequired();
+            entity.Property(entry => entry.ReleasedBy).HasMaxLength(256);
+            entity.Property(entry => entry.ReleaseReason).HasMaxLength(500);
+            entity.HasIndex(entry => new { entry.TenantId, entry.CompanyId, entry.FiscalPeriodId, entry.ChartOfAccountId })
+                .IsUnique()
+                .HasDatabaseName("UX_FiscalPeriodAccountLocks_Period_Account");
+            entity.ToTable("FiscalPeriodAccountLocks", table => table.HasCheckConstraint(
+                "CK_FiscalPeriodAccountLocks_Reasons",
+                "\"LockReason\" <> '' AND \"LockReason\" = btrim(\"LockReason\") AND " +
+                "(\"ReleaseReason\" IS NULL OR (\"ReleaseReason\" <> '' AND \"ReleaseReason\" = btrim(\"ReleaseReason\")))"));
+            entity.HasOne(entry => entry.FiscalPeriod)
+                .WithMany()
+                .HasForeignKey(entry => new { entry.FiscalPeriodId, entry.CompanyId, entry.TenantId })
+                .HasPrincipalKey(period => new { period.Id, period.CompanyId, period.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(entry => entry.ChartOfAccount)
+                .WithMany()
+                .HasForeignKey(entry => new { entry.ChartOfAccountId, entry.CompanyId, entry.TenantId })
+                .HasPrincipalKey(account => new { account.Id, account.CompanyId, account.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(entry => new { entry.CompanyId, entry.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FixedAsset>(entity =>
+        {
+            entity.HasQueryFilter(asset => asset.TenantId == CurrentTenantId);
+            entity.Property(asset => asset.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(asset => asset.AssetCode).HasMaxLength(64).IsRequired();
+            entity.Property(asset => asset.Name).HasMaxLength(200).IsRequired();
+            entity.Property(asset => asset.CostAmount).HasColumnType("decimal(18,6)");
+            entity.Property(asset => asset.SalvageValue).HasColumnType("decimal(18,6)");
+            entity.Property(asset => asset.DisposalProceeds).HasColumnType("decimal(18,6)");
+            entity.Property(asset => asset.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(asset => asset.CapitalizedBy).HasMaxLength(256);
+            entity.Property(asset => asset.DisposedBy).HasMaxLength(256);
+            entity.Property(asset => asset.DisposalReason).HasMaxLength(500);
+            entity.HasAlternateKey(asset => new { asset.Id, asset.CompanyId, asset.TenantId });
+            entity.HasIndex(asset => new { asset.TenantId, asset.CompanyId, asset.AssetCode })
+                .IsUnique()
+                .HasDatabaseName("UX_FixedAssets_Company_Code");
+            entity.ToTable("FixedAssets", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_FixedAssets_Code",
+                    "\"AssetCode\" <> '' AND \"AssetCode\" = btrim(\"AssetCode\")");
+                table.HasCheckConstraint(
+                    "CK_FixedAssets_Name",
+                    "\"Name\" <> '' AND \"Name\" = btrim(\"Name\")");
+                table.HasCheckConstraint(
+                    "CK_FixedAssets_Schedule",
+                    "\"CostAmount\" > 0 AND \"SalvageValue\" >= 0 AND \"SalvageValue\" < \"CostAmount\" AND " +
+                    "\"UsefulLifeMonths\" BETWEEN 1 AND 600 AND \"DepreciationStartDate\" >= \"AcquisitionDate\"");
+                table.HasCheckConstraint(
+                    "CK_FixedAssets_Lifecycle",
+                    "(\"Status\" = 'Registered' AND \"CapitalizationJournalEntryId\" IS NULL AND \"DisposalJournalEntryId\" IS NULL) OR " +
+                    "(\"Status\" = 'Capitalized' AND \"CapitalizationJournalEntryId\" IS NOT NULL AND \"DisposalJournalEntryId\" IS NULL) OR " +
+                    "(\"Status\" = 'Disposed' AND \"CapitalizationJournalEntryId\" IS NOT NULL AND \"DisposalJournalEntryId\" IS NOT NULL)");
+            });
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(asset => new { asset.CompanyId, asset.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(asset => new { asset.CapitalizationJournalEntryId, asset.TenantId })
+                .HasPrincipalKey(entry => new { entry.Id, entry.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(asset => new { asset.DisposalJournalEntryId, asset.TenantId })
+                .HasPrincipalKey(entry => new { entry.Id, entry.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CardSettlementBatch>(entity =>
+        {
+            entity.HasQueryFilter(batch => batch.TenantId == CurrentTenantId);
+            entity.Property(batch => batch.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(batch => batch.Reference).HasMaxLength(100).IsRequired();
+            entity.Property(batch => batch.ImportedBy).HasMaxLength(256).IsRequired();
+            entity.Property(batch => batch.GrossAmount).HasColumnType("decimal(18,6)");
+            entity.Property(batch => batch.FeeAmount).HasColumnType("decimal(18,6)");
+            entity.Property(batch => batch.NetAmount).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(batch => new { batch.Id, batch.CompanyId, batch.TenantId });
+            entity.HasIndex(batch => new { batch.TenantId, batch.CompanyId, batch.Reference })
+                .IsUnique()
+                .HasDatabaseName("UX_CardSettlementBatches_Company_Reference");
+            entity.ToTable("CardSettlementBatches", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_CardSettlementBatches_Reference",
+                    "\"Reference\" <> '' AND \"Reference\" = btrim(\"Reference\")");
+                table.HasCheckConstraint(
+                    "CK_CardSettlementBatches_Amounts",
+                    "\"GrossAmount\" > 0 AND \"FeeAmount\" >= 0 AND \"FeeAmount\" <= \"GrossAmount\" AND " +
+                    "\"NetAmount\" = \"GrossAmount\" - \"FeeAmount\"");
+            });
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(batch => new { batch.CompanyId, batch.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CardSettlementMatch>(entity =>
+        {
+            entity.HasQueryFilter(match => match.TenantId == CurrentTenantId);
+            entity.Property(match => match.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(match => match.Amount).HasColumnType("decimal(18,6)");
+            entity.Property(match => match.MatchedBy).HasMaxLength(256).IsRequired();
+            entity.Property(match => match.UnmatchedBy).HasMaxLength(256);
+            entity.Property(match => match.UnmatchReason).HasMaxLength(500);
+            // One active settlement per card tender; withdrawn settlements remain as history.
+            entity.HasIndex(match => new { match.TenantId, match.CompanyId, match.PosSaleTenderId })
+                .IsUnique()
+                .HasFilter("\"IsActive\"")
+                .HasDatabaseName("UX_CardSettlementMatches_ActiveTender");
+            entity.ToTable("CardSettlementMatches", table => table.HasCheckConstraint(
+                "CK_CardSettlementMatches_Withdrawal",
+                "\"IsActive\" OR (\"UnmatchedAtUtc\" IS NOT NULL AND \"UnmatchReason\" IS NOT NULL AND \"UnmatchReason\" <> '')"));
+            entity.HasOne(match => match.CardSettlementBatch)
+                .WithMany()
+                .HasForeignKey(match => new { match.CardSettlementBatchId, match.CompanyId, match.TenantId })
+                .HasPrincipalKey(batch => new { batch.Id, batch.CompanyId, batch.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(match => match.PosSaleTender)
+                .WithMany()
+                .HasForeignKey(match => new { match.PosSaleTenderId, match.CompanyId, match.TenantId })
+                .HasPrincipalKey(tender => new { tender.Id, tender.CompanyId, tender.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CrmLead>(entity =>
+        {
+            entity.HasQueryFilter(lead => lead.TenantId == CurrentTenantId);
+            entity.Property(lead => lead.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(lead => lead.Name).HasMaxLength(200).IsRequired();
+            entity.Property(lead => lead.Email).HasMaxLength(254);
+            entity.Property(lead => lead.Phone).HasMaxLength(40);
+            entity.Property(lead => lead.Source).HasMaxLength(100).IsRequired();
+            entity.Property(lead => lead.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(lead => lead.DisqualifiedReason).HasMaxLength(500);
+            entity.Property(lead => lead.CreatedByUser).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(lead => new { lead.Id, lead.CompanyId, lead.TenantId });
+            entity.ToTable("CrmLeads", table => table.HasCheckConstraint(
+                "CK_CrmLeads_Disqualified",
+                "(\"Status\" = 'Disqualified') = (\"DisqualifiedReason\" IS NOT NULL)"));
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(lead => new { lead.CompanyId, lead.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CrmOpportunity>(entity =>
+        {
+            entity.HasQueryFilter(opportunity => opportunity.TenantId == CurrentTenantId);
+            entity.Property(opportunity => opportunity.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(opportunity => opportunity.Title).HasMaxLength(200).IsRequired();
+            entity.Property(opportunity => opportunity.Owner).HasMaxLength(256).IsRequired();
+            entity.Property(opportunity => opportunity.Stage).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(opportunity => opportunity.ExpectedValue).HasColumnType("decimal(18,6)");
+            entity.Property(opportunity => opportunity.ClosedBy).HasMaxLength(256);
+            entity.Property(opportunity => opportunity.LostReason).HasMaxLength(500);
+            entity.Property(opportunity => opportunity.CreatedByUser).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(opportunity => new { opportunity.Id, opportunity.CompanyId, opportunity.TenantId });
+            entity.ToTable("CrmOpportunities", table =>
+            {
+                table.HasCheckConstraint("CK_CrmOpportunities_Value", "\"ExpectedValue\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_CrmOpportunities_Won",
+                    "(\"Stage\" = 'Won') = (\"CustomerId\" IS NOT NULL) AND " +
+                    "(\"Stage\" = 'Lost') = (\"LostReason\" IS NOT NULL) AND " +
+                    "(\"Stage\" IN ('Won', 'Lost')) = (\"ClosedAtUtc\" IS NOT NULL)");
+            });
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(opportunity => new { opportunity.CompanyId, opportunity.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<CrmLead>()
+                .WithMany()
+                .HasForeignKey(opportunity => new { opportunity.LeadId, opportunity.CompanyId, opportunity.TenantId })
+                .HasPrincipalKey(lead => new { lead.Id, lead.CompanyId, lead.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Customer>()
+                .WithMany()
+                .HasForeignKey(opportunity => new { opportunity.CustomerId, opportunity.CompanyId, opportunity.TenantId })
+                .HasPrincipalKey(customer => new { customer.Id, customer.CompanyId, customer.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CrmActivity>(entity =>
+        {
+            entity.HasQueryFilter(activity => activity.TenantId == CurrentTenantId);
+            entity.Property(activity => activity.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(activity => activity.Kind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(activity => activity.Summary).HasMaxLength(500).IsRequired();
+            entity.Property(activity => activity.RecordedByUser).HasMaxLength(256).IsRequired();
+            entity.ToTable("CrmActivities", table => table.HasCheckConstraint(
+                "CK_CrmActivities_OneTarget",
+                "(\"LeadId\" IS NULL) <> (\"OpportunityId\" IS NULL)"));
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(activity => new { activity.CompanyId, activity.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<CrmLead>()
+                .WithMany()
+                .HasForeignKey(activity => new { activity.LeadId, activity.CompanyId, activity.TenantId })
+                .HasPrincipalKey(lead => new { lead.Id, lead.CompanyId, lead.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<CrmOpportunity>()
+                .WithMany()
+                .HasForeignKey(activity => new { activity.OpportunityId, activity.CompanyId, activity.TenantId })
+                .HasPrincipalKey(opportunity => new { opportunity.Id, opportunity.CompanyId, opportunity.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ExpenseClaim>(entity =>
+        {
+            entity.HasQueryFilter(claim => claim.TenantId == CurrentTenantId);
+            entity.Property(claim => claim.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(claim => claim.ClaimNumber).HasMaxLength(64).IsRequired();
+            entity.Property(claim => claim.ClaimantName).HasMaxLength(200).IsRequired();
+            entity.Property(claim => claim.Description).HasMaxLength(500).IsRequired();
+            entity.Property(claim => claim.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(claim => claim.TotalAmount).HasColumnType("decimal(18,6)");
+            entity.Property(claim => claim.CreatedByUser).HasMaxLength(256).IsRequired();
+            entity.Property(claim => claim.SubmittedBy).HasMaxLength(256);
+            entity.Property(claim => claim.ApprovedBy).HasMaxLength(256);
+            entity.Property(claim => claim.RejectedBy).HasMaxLength(256);
+            entity.Property(claim => claim.RejectionReason).HasMaxLength(500);
+            entity.Property(claim => claim.PaidBy).HasMaxLength(256);
+            entity.HasAlternateKey(claim => new { claim.Id, claim.CompanyId, claim.TenantId });
+            entity.HasIndex(claim => new { claim.TenantId, claim.CompanyId, claim.ClaimNumber })
+                .IsUnique()
+                .HasDatabaseName("UX_ExpenseClaims_Company_Number");
+            entity.ToTable("ExpenseClaims", table =>
+            {
+                table.HasCheckConstraint("CK_ExpenseClaims_Total", "\"TotalAmount\" > 0");
+                table.HasCheckConstraint(
+                    "CK_ExpenseClaims_Lifecycle",
+                    "(\"Status\" = 'Draft' AND \"ApprovalJournalEntryId\" IS NULL AND \"PaymentJournalEntryId\" IS NULL) OR " +
+                    "(\"Status\" = 'Submitted' AND \"ApprovalJournalEntryId\" IS NULL AND \"PaymentJournalEntryId\" IS NULL) OR " +
+                    "(\"Status\" = 'Rejected' AND \"RejectionReason\" IS NOT NULL AND \"ApprovalJournalEntryId\" IS NULL AND \"PaymentJournalEntryId\" IS NULL) OR " +
+                    "(\"Status\" = 'Approved' AND \"ApprovalJournalEntryId\" IS NOT NULL AND \"PaymentJournalEntryId\" IS NULL) OR " +
+                    "(\"Status\" = 'Paid' AND \"ApprovalJournalEntryId\" IS NOT NULL AND \"PaymentJournalEntryId\" IS NOT NULL)");
+            });
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(claim => new { claim.CompanyId, claim.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(claim => new { claim.ApprovalJournalEntryId, claim.TenantId })
+                .HasPrincipalKey(entry => new { entry.Id, entry.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(claim => new { claim.PaymentJournalEntryId, claim.TenantId })
+                .HasPrincipalKey(entry => new { entry.Id, entry.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ExpenseClaimLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.Description).HasMaxLength(500).IsRequired();
+            entity.Property(line => line.Amount).HasColumnType("decimal(18,6)");
+            entity.HasIndex(line => new { line.TenantId, line.ExpenseClaimId, line.LineNumber }).IsUnique();
+            entity.ToTable("ExpenseClaimLines", table => table.HasCheckConstraint("CK_ExpenseClaimLines_Amount", "\"Amount\" > 0"));
+            entity.HasOne(line => line.ExpenseClaim)
+                .WithMany(claim => claim.Lines)
+                .HasForeignKey(line => new { line.ExpenseClaimId, line.CompanyId, line.TenantId })
+                .HasPrincipalKey(claim => new { claim.Id, claim.CompanyId, claim.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ChartOfAccount>()
+                .WithMany()
+                .HasForeignKey(line => new { line.ExpenseChartOfAccountId, line.CompanyId, line.TenantId })
+                .HasPrincipalKey(account => new { account.Id, account.CompanyId, account.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankStatement>(entity =>
+        {
+            entity.HasQueryFilter(statement => statement.TenantId == CurrentTenantId);
+            entity.Property(statement => statement.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(statement => statement.Reference).HasMaxLength(100);
+            entity.Property(statement => statement.ImportedBy).HasMaxLength(256).IsRequired();
+            entity.Property(statement => statement.OpeningBalance).HasColumnType("decimal(18,6)");
+            entity.Property(statement => statement.ClosingBalance).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(statement => new { statement.Id, statement.CompanyId, statement.TenantId });
+            entity.HasIndex(statement => new { statement.TenantId, statement.CompanyId, statement.ChartOfAccountId, statement.StatementDate })
+                .IsUnique()
+                .HasDatabaseName("UX_BankStatements_Account_Date");
+            entity.ToTable("BankStatements", table => table.HasCheckConstraint(
+                "CK_BankStatements_Reference",
+                "\"Reference\" IS NULL OR (\"Reference\" <> '' AND \"Reference\" = btrim(\"Reference\"))"));
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(statement => new { statement.CompanyId, statement.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ChartOfAccount>()
+                .WithMany()
+                .HasForeignKey(statement => new { statement.ChartOfAccountId, statement.CompanyId, statement.TenantId })
+                .HasPrincipalKey(account => new { account.Id, account.CompanyId, account.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankStatementLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.Description).HasMaxLength(500).IsRequired();
+            entity.Property(line => line.Reference).HasMaxLength(100);
+            entity.Property(line => line.Amount).HasColumnType("decimal(18,6)");
+            entity.HasAlternateKey(line => new { line.Id, line.CompanyId, line.TenantId });
+            entity.HasIndex(line => new { line.TenantId, line.BankStatementId, line.LineNumber }).IsUnique();
+            entity.ToTable("BankStatementLines", table =>
+            {
+                table.HasCheckConstraint("CK_BankStatementLines_Amount", "\"Amount\" <> 0");
+                table.HasCheckConstraint(
+                    "CK_BankStatementLines_Description",
+                    "\"Description\" <> '' AND \"Description\" = btrim(\"Description\")");
+            });
+            entity.HasOne(line => line.BankStatement)
+                .WithMany(statement => statement.Lines)
+                .HasForeignKey(line => new { line.BankStatementId, line.CompanyId, line.TenantId })
+                .HasPrincipalKey(statement => new { statement.Id, statement.CompanyId, statement.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankStatementMatch>(entity =>
+        {
+            entity.HasQueryFilter(match => match.TenantId == CurrentTenantId);
+            entity.Property(match => match.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(match => match.MatchedBy).HasMaxLength(256).IsRequired();
+            entity.Property(match => match.UnmatchedBy).HasMaxLength(256);
+            entity.Property(match => match.UnmatchReason).HasMaxLength(500);
+            // At most one active match per statement line and per ledger line; withdrawn matches are history.
+            entity.HasIndex(match => new { match.TenantId, match.CompanyId, match.BankStatementLineId })
+                .IsUnique()
+                .HasFilter("\"IsActive\"")
+                .HasDatabaseName("UX_BankStatementMatches_ActiveLine");
+            entity.HasIndex(match => new { match.TenantId, match.CompanyId, match.JournalLineId })
+                .IsUnique()
+                .HasFilter("\"IsActive\"")
+                .HasDatabaseName("UX_BankStatementMatches_ActiveJournalLine");
+            entity.ToTable("BankStatementMatches", table => table.HasCheckConstraint(
+                "CK_BankStatementMatches_Withdrawal",
+                "\"IsActive\" OR (\"UnmatchedAtUtc\" IS NOT NULL AND \"UnmatchReason\" IS NOT NULL AND \"UnmatchReason\" <> '')"));
+            entity.HasOne(match => match.BankStatementLine)
+                .WithMany()
+                .HasForeignKey(match => new { match.BankStatementLineId, match.CompanyId, match.TenantId })
+                .HasPrincipalKey(line => new { line.Id, line.CompanyId, line.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(match => match.JournalLine)
+                .WithMany()
+                .HasForeignKey(match => new { match.JournalLineId, match.CompanyId, match.TenantId })
+                .HasPrincipalKey(line => new { line.Id, line.CompanyId, line.TenantId })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -1694,6 +2097,11 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
                 .HasForeignKey(entry => new { entry.ReversalOfJournalEntryId, entry.TenantId })
                 .HasPrincipalKey(original => new { original.Id, original.TenantId })
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FiscalPeriod>()
+                .WithMany()
+                .HasForeignKey(entry => new { entry.FiscalPeriodId, entry.CompanyId, entry.TenantId })
+                .HasPrincipalKey(period => new { period.Id, period.CompanyId, period.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<JournalLine>(entity =>
@@ -1706,6 +2114,7 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(line => line.Debit).HasColumnType("decimal(18,6)");
             entity.Property(line => line.Credit).HasColumnType("decimal(18,6)");
             entity.HasIndex(line => new { line.TenantId, line.JournalEntryId, line.LineNumber }).IsUnique();
+            entity.HasAlternateKey(line => new { line.Id, line.CompanyId, line.TenantId });
             entity.HasIndex(line => new { line.TenantId, line.CompanyId, line.ChartOfAccountId });
             entity.ToTable("JournalLines", table => table.HasCheckConstraint(
                 "CK_JournalLines_OneSide",
@@ -2036,6 +2445,8 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
 
         modelBuilder.Entity<SalesInvoice>(entity =>
         {
+            entity.Property(invoice => invoice.CreditLimitOverrideReason).HasMaxLength(500);
+            entity.Property(invoice => invoice.CreditLimitOverrideBy).HasMaxLength(256);
             entity.HasQueryFilter(invoice => invoice.TenantId == CurrentTenantId);
             entity.Property(invoice => invoice.TenantId).HasMaxLength(64).IsRequired();
             entity.Property(invoice => invoice.InvoiceNumber).HasMaxLength(128).IsRequired();
@@ -2094,6 +2505,7 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(register => register.TenantId).HasMaxLength(64).IsRequired();
             entity.Property(register => register.Name).HasMaxLength(100).IsRequired();
             entity.HasIndex(register => new { register.TenantId, register.CompanyId, register.Name }).IsUnique();
+            entity.Property(register => register.VarianceApprovalThreshold).HasColumnType("decimal(18,6)");
             entity.HasOne(register => register.Location)
                 .WithMany()
                 .HasForeignKey(register => new { register.LocationId, register.TenantId })
@@ -2113,6 +2525,9 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(shift => shift.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
             entity.Property(shift => shift.OpenedBy).HasMaxLength(256).IsRequired();
             entity.Property(shift => shift.ClosedBy).HasMaxLength(256);
+            entity.Property(shift => shift.CloseApprovedBy).HasMaxLength(256);
+            entity.Property(shift => shift.CloseRejectedBy).HasMaxLength(256);
+            entity.Property(shift => shift.CloseRejectionReason).HasMaxLength(500);
             entity.Property(shift => shift.OpeningFloat).HasColumnType("decimal(18,6)");
             entity.Property(shift => shift.CountedCash).HasColumnType("decimal(18,6)");
             entity.Property(shift => shift.ExpectedCash).HasColumnType("decimal(18,6)");
@@ -2199,6 +2614,7 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(tender => tender.Method).HasConversion<string>().HasMaxLength(16).IsRequired();
             entity.Property(tender => tender.Amount).HasColumnType("decimal(18,6)");
             entity.HasIndex(tender => new { tender.TenantId, tender.PosSaleId, tender.LineNumber }).IsUnique();
+            entity.HasAlternateKey(tender => new { tender.Id, tender.CompanyId, tender.TenantId });
             entity.HasOne(tender => tender.PosSale)
                 .WithMany(sale => sale.Tenders)
                 .HasForeignKey(tender => new { tender.PosSaleId, tender.TenantId })

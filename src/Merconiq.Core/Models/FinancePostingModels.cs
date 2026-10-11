@@ -22,7 +22,8 @@ public sealed record JournalPostingRequest(
     string SourceDocumentId,
     string SourceAction,
     int SourceVersion,
-    IReadOnlyList<JournalLineInput> Lines);
+    IReadOnlyList<JournalLineInput> Lines,
+    int? FiscalPeriodId = null);
 
 /// <summary>The committed-or-replayed outcome of one posting action.</summary>
 public sealed record JournalPostingResult(

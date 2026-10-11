@@ -71,6 +71,11 @@ public sealed class JournalPostingService(
             if (original.ReversalOfJournalEntryId is not null)
                 throw new FinancePostingConflictException(
                     "A reversal journal cannot be reversed again; post a corrective journal instead.");
+            // Fixed-asset journals are replay keys for depreciation months; reversing one would silently
+            // stop that month from ever posting again, so asset corrections go through disposal instead.
+            if (original.SourceDocumentType == FixedAssetService.SourceDocumentType)
+                throw new FinancePostingConflictException(
+                    "Fixed-asset postings are corrected through the fixed-asset workflow, not by generic reversal.");
 
             var reversal = new JournalPostingRequest(
                 request.CompanyId,
@@ -87,7 +92,8 @@ public sealed class JournalPostingService(
                         $"Reversal of {original.JournalNumber}",
                         line.Credit,
                         line.Debit))
-                    .ToArray());
+                    .ToArray(),
+                original.FiscalPeriodId);
 
             result = await PostCoreAsync(reversal, actor, original.Id, reason, cancellationToken);
         }, cancellationToken: cancellationToken);
@@ -224,8 +230,12 @@ public sealed class JournalPostingService(
 
                 // The period gate runs inside this transaction under the same advisory-lock
                 // family as period close/reopen, so a close cannot race the validation.
-                await fiscalCalendar.EnsurePeriodOpenForDateAsync(
-                    normalized.CompanyId, normalized.PostingDate, cancellationToken);
+                var period = normalized.FiscalPeriodId is int adjustmentPeriodId
+                    ? await fiscalCalendar.EnsureAdjustmentPeriodOpenAsync(
+                        normalized.CompanyId, adjustmentPeriodId, normalized.PostingDate, cancellationToken)
+                    : await fiscalCalendar.EnsurePeriodOpenForDateAsync(
+                        normalized.CompanyId, normalized.PostingDate, cancellationToken);
+                await RequireAccountsUnlockedAsync(normalized, period, cancellationToken);
 
                 var entry = await BuildJournalEntryAsync(
                     normalized, company, requestHash, actor, reversalOfJournalEntryId, reversalReason, cancellationToken);
@@ -248,6 +258,35 @@ public sealed class JournalPostingService(
             normalized.SourceVersion,
             result.TotalDebit);
         return result;
+    }
+
+    /// <summary>
+    /// Rejects the journal when any touched account is locked for the posting period. Reversals run
+    /// through this same gate, so a locked account cannot be corrected inside a locked period either.
+    /// </summary>
+    private async Task RequireAccountsUnlockedAsync(
+        JournalPostingRequest request,
+        FiscalPeriod period,
+        CancellationToken cancellationToken)
+    {
+        var accountIds = request.Lines.Select(line => line.ChartOfAccountId).Distinct().ToList();
+        var lockedAccountIds = await context.FiscalPeriodAccountLocks
+            .Where(entry => entry.CompanyId == request.CompanyId &&
+                            entry.FiscalPeriodId == period.Id &&
+                            entry.IsLocked &&
+                            accountIds.Contains(entry.ChartOfAccountId))
+            .Select(entry => entry.ChartOfAccountId)
+            .ToListAsync(cancellationToken);
+        if (lockedAccountIds.Count == 0)
+            return;
+
+        var lockedCodes = await context.ChartOfAccounts
+            .Where(account => account.CompanyId == request.CompanyId && lockedAccountIds.Contains(account.Id))
+            .OrderBy(account => account.AccountCode)
+            .Select(account => account.AccountCode)
+            .ToListAsync(cancellationToken);
+        throw new FinancePostingValidationException(
+            $"Chart account(s) {string.Join(", ", lockedCodes)} are locked for fiscal period '{period.Name}' and cannot receive postings.");
     }
 
     private async Task<JournalEntry> BuildJournalEntryAsync(
@@ -297,6 +336,7 @@ public sealed class JournalPostingService(
             TotalCredit = totalDebit,
             ReversalOfJournalEntryId = reversalOfJournalEntryId,
             ReversalReason = reversalReason,
+            FiscalPeriodId = request.FiscalPeriodId,
             PostedAtUtc = DateTime.UtcNow,
             PostedBy = actor.Trim(),
             Lines = request.Lines

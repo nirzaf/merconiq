@@ -37,5 +37,11 @@ public sealed class SalesInvoice : AuditableEntity
 
     public string PostedBy { get; set; } = string.Empty;
 
+    /// <summary>Reviewer's reason when this invoice exceeded the customer's credit limit and was approved anyway.</summary>
+    public string? CreditLimitOverrideReason { get; set; }
+
+    /// <summary>The approver who recorded the credit-limit override; null when no override was needed.</summary>
+    public string? CreditLimitOverrideBy { get; set; }
+
     public ICollection<SalesInvoiceLine> Lines { get; set; } = new List<SalesInvoiceLine>();
 }

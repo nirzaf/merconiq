@@ -42,6 +42,15 @@ public static class ApplicationServiceExtensions
         services.AddScoped<IMasterDataImportService, Merconiq.Infrastructure.Services.MasterDataImportService>();
         services.AddScoped<IOpeningStockImportService, Merconiq.Infrastructure.Services.OpeningStockImportService>();
         services.AddScoped<IFiscalCalendarService, Merconiq.Infrastructure.Services.FiscalCalendarService>();
+        services.AddScoped<IFiscalAccountLockService, Merconiq.Infrastructure.Services.FiscalAccountLockService>();
+        services.AddScoped<IPosReceiptService, Merconiq.Infrastructure.Services.PosReceiptService>();
+        services.AddScoped<IBankReconciliationService, Merconiq.Infrastructure.Services.BankReconciliationService>();
+        services.AddScoped<IFixedAssetService, Merconiq.Infrastructure.Services.FixedAssetService>();
+        services.AddScoped<ICustomerCreditService, Merconiq.Infrastructure.Services.CustomerCreditService>();
+        services.AddScoped<ICardSettlementService, Merconiq.Infrastructure.Services.CardSettlementService>();
+        services.AddScoped<ITillApprovalService, Merconiq.Infrastructure.Services.TillApprovalService>();
+        services.AddScoped<IExpenseClaimService, Merconiq.Infrastructure.Services.ExpenseClaimService>();
+        services.AddScoped<ICrmService, Merconiq.Infrastructure.Services.CrmService>();
         services.AddScoped<IJournalPostingService, Merconiq.Infrastructure.Services.JournalPostingService>();
         services.AddScoped<IAccountPostingPolicy, Merconiq.Infrastructure.Services.AccountPostingPolicyService>();
         services.AddScoped<IGoodsReceiptService, Merconiq.Infrastructure.Services.GoodsReceiptService>();

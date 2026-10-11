@@ -36,4 +36,17 @@ public sealed class PosShift : AuditableEntity
 
     /// <summary>Counted minus expected; posted to the cash over/short account at close.</summary>
     public decimal? OverShortValue { get; set; }
+
+    /// <summary>Reviewer who approved a pending close; the over/short journal posts at approval.</summary>
+    public string? CloseApprovedBy { get; set; }
+
+    public DateTime? CloseApprovedAtUtc { get; set; }
+
+    /// <summary>Reviewer who sent a pending close back to the cashier for a recount.</summary>
+    public string? CloseRejectedBy { get; set; }
+
+    public DateTime? CloseRejectedAtUtc { get; set; }
+
+    /// <summary>Mandatory reviewer reason recorded with a rejected close.</summary>
+    public string? CloseRejectionReason { get; set; }
 }

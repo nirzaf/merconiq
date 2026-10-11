@@ -737,3 +737,39 @@ historical branch snapshot; owner-approved legacy location mappings remain
 pending in #268. Write-off quantity and value are reported as transit
 dispositions and are not expected to have a physical stock transaction or
 valuation posting. Lot-specific valuation is also outside this report's claims.
+
+## Finance, reconciliation and operations endpoints
+
+All routes are under `/api/v1/companies/{companyId}` and need the capability shown. Writes that post
+journals use the finance kernel; reconciliation, CRM and card-settlement writes never post. Posting rules and
+journal sources are in `docs/FINANCE_POSTING.md`.
+
+| Route | Capability | Behavior |
+| --- | --- | --- |
+| `GET /statements/profit-and-loss`, `GET /statements/balance-sheet` | `View` | Each response gains `rollups`: classified group accounts with same-class subtotals at every depth. |
+| `POST /fiscal-years/{fiscalYearId}/adjustment-period` | `Administer` | Creates period 13 for the year, dated on the year end. |
+| `GET/POST /fiscal-periods/{periodId}/account-locks`, `POST .../account-locks/{chartOfAccountId}/release` | `View` / `Approve` / `Administer` | Locks a posting account for one period; release needs a reason. |
+| `GET/POST /bank-statements`, `GET /bank-statements/{id}`, `GET /bank-statements/{id}/reconciliation` | `View` / `Edit` | Import a statement that must foot exactly; read it with its matches and the reconciliation figures. |
+| `POST /bank-statements/{id}/lines/{lineId}/match`, `.../unmatch` | `Approve` | One-to-one match to a bank-account ledger line with equal amount and date on or before the statement; unmatch needs a reason. |
+| `GET/POST /fixed-assets`, `GET /fixed-assets/{id}` | `View` / `Edit` | Register an asset; the read includes posted depreciation, accumulated depreciation and net book value. |
+| `POST /fixed-assets/{id}/capitalize` | `Post` | Posts the acquisition against the given payment or payable account. |
+| `POST /fixed-assets/depreciation-runs` | `Post` | Posts every whole month that ends on or before `asOfDate`; committed months replay. |
+| `POST /fixed-assets/{id}/dispose` | `Post` | Requires depreciation through the disposal date; posts proceeds, cost removal and the gain or loss. |
+| `GET/POST /expense-claims`, `GET /expense-claims/{id}` | `View` / `Edit` | Create a draft with expense lines; the read includes the lines. |
+| `POST /expense-claims/{id}/submit` | `Edit` | Draft to submitted. |
+| `POST /expense-claims/{id}/approval` | `Approve` | Submitted to approved; posts the expenses against the employee payable. |
+| `POST /expense-claims/{id}/rejection` | `Approve` | Submitted to rejected, with a mandatory reason; final. |
+| `POST /expense-claims/{id}/payment` | `Post` | Approved to paid from a bank account on `paymentDate`. |
+| `GET/PUT /customers/{customerId}/credit` | `View` / `Approve` | Read the limit, open receivable and headroom; set or clear the limit with a reason. |
+| `POST /sales/invoices` | `Post` | Accepts `overrideCreditLimit` and `creditOverrideReason`. An override needs `Approve` and a reason and is recorded on the invoice. |
+| `GET /pos/sales/{saleId}/receipt` | `View` | `text/plain` receipt for a committed sale, 40 columns; `404` outside the company. |
+| `GET/POST /card-settlements`, `GET /card-settlements/{batchId}/reconciliation` | `View` / `Edit` | Import an acquirer batch (gross and fee; net is derived); the reconciliation lists card tenders still awaiting settlement. |
+| `POST /card-settlements/{batchId}/tenders/{tenderId}/match`, `.../unmatch` | `Approve` | Settles a card tender against a batch on or after the sale date, never beyond the batch gross. |
+| `POST /pos/shifts/{shiftId}/close-approval`, `.../close-rejection` | `Approve` | Approve posts the held over/short journal once; rejection reopens the shift with a reason. A close returns `approvalRequired: true` while held. |
+| `PUT /pos/registers/{registerId}/variance-threshold` | `Administer` | Sets or clears the register threshold; `null` means every close posts immediately. |
+| `GET/POST /crm/leads`, `POST /crm/leads/{id}/qualification`, `.../disqualification`, `.../conversion` | `View` / `Edit` | Lead lifecycle; conversion requires a qualified lead. |
+| `GET/POST /crm/opportunities`, `POST /crm/opportunities/{id}/stage`, `.../won`, `.../lost` | `View` / `Edit` | Opportunities move between open stages; winning links an existing customer of the company; losing needs a reason. |
+| `GET/POST /crm/activities` | `View` / `Edit` | Activities belong to exactly one lead or one opportunity. |
+| `GET /crm/pipeline` | `View` | Count and expected value by stage, with the open value. |
+
+Account, fiscal and posting responses keep their existing fields; new fields are additive.

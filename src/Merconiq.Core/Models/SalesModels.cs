@@ -59,7 +59,9 @@ public sealed record PostSalesInvoiceRequest(
     string RequestKey,
     IReadOnlyList<PostSalesInvoiceLine> Lines,
     DateOnly? PostingDate = null,
-    string? Notes = null);
+    string? Notes = null,
+    bool OverrideCreditLimit = false,
+    string? CreditOverrideReason = null);
 
 /// <summary>The committed-or-replayed sales-invoice outcome.</summary>
 public sealed record SalesInvoiceResult(

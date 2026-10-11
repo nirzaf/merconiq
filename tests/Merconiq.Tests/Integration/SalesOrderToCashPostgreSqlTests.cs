@@ -177,6 +177,128 @@ public sealed class SalesOrderToCashPostgreSqlTests
             .WithMessage("*exceeds its open balance*");
     }
 
+    [PostgreSqlFact]
+    public async Task CreditLimit_BlocksAnInvoiceOverTheLimit_UntilAReviewerOverridesWithAReason()
+    {
+        var tenantId = $"o2c-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId, openingStock: 60);
+        await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, 100m, "Trade reference checked", Actor));
+        var order = await WithSalesServiceAsync(tenantId, service => service.PostSalesOrderAsync(
+            Order(environment, quantity: 10, price: SalePrice), Actor));
+        var delivery = await WithSalesServiceAsync(tenantId, service => service.PostDeliveryAsync(
+            Delivery(environment, order.SalesOrderId, order.FirstLineId, quantity: 10),
+            environment.MutationScope, Actor));
+        var request = SalesInvoice(environment, delivery.FirstLineId, environment.CustomerId);
+
+        var blocked = async () => await WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(request, Actor));
+        (await blocked.Should().ThrowAsync<FinancePostingConflictException>())
+            .WithMessage("*credit limit of 100.00*");
+
+        var withoutReason = async () => await WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(
+            request with { OverrideCreditLimit = true }, Actor));
+        await withoutReason.Should().ThrowAsync<FinancePostingValidationException>();
+
+        var approved = await WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(
+            request with { OverrideCreditLimit = true, CreditOverrideReason = "Key account, payment agreed" }, Actor));
+        approved.TotalValue.Should().Be(150m);
+
+        await using var verify = _fixture.CreateContext(tenantId);
+        var invoice = await verify.SalesInvoices.SingleAsync(candidate => candidate.Id == approved.SalesInvoiceId);
+        invoice.CreditLimitOverrideReason.Should().Be("Key account, payment agreed");
+        invoice.CreditLimitOverrideBy.Should().Be(Actor);
+    }
+
+    [PostgreSqlFact]
+    public async Task CreditLimit_InvoiceWithinTheLimit_PostsWithoutAnOverride()
+    {
+        var tenantId = $"o2c-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId, openingStock: 60);
+        await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, 150m, "Standard terms", Actor));
+        var order = await WithSalesServiceAsync(tenantId, service => service.PostSalesOrderAsync(
+            Order(environment, quantity: 10, price: SalePrice), Actor));
+        var delivery = await WithSalesServiceAsync(tenantId, service => service.PostDeliveryAsync(
+            Delivery(environment, order.SalesOrderId, order.FirstLineId, quantity: 10),
+            environment.MutationScope, Actor));
+
+        var invoice = await WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(
+            SalesInvoice(environment, delivery.FirstLineId, environment.CustomerId), Actor));
+
+        invoice.TotalValue.Should().Be(150m, "exactly at the limit is allowed");
+        await using var verify = _fixture.CreateContext(tenantId);
+        (await verify.SalesInvoices.SingleAsync(candidate => candidate.Id == invoice.SalesInvoiceId))
+            .CreditLimitOverrideBy.Should().BeNull();
+    }
+
+    [PostgreSqlFact]
+    public async Task CreditExposure_NetsReceiptsAndIsReportedAgainstTheLimit()
+    {
+        var tenantId = $"o2c-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId, openingStock: 60);
+        await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, 500m, "Trade reference checked", Actor));
+        var order = await WithSalesServiceAsync(tenantId, service => service.PostSalesOrderAsync(
+            Order(environment, quantity: 10, price: SalePrice), Actor));
+        var delivery = await WithSalesServiceAsync(tenantId, service => service.PostDeliveryAsync(
+            Delivery(environment, order.SalesOrderId, order.FirstLineId, quantity: 10),
+            environment.MutationScope, Actor));
+        var invoice = await WithSalesServiceAsync(tenantId, service => service.PostSalesInvoiceAsync(
+            SalesInvoice(environment, delivery.FirstLineId, environment.CustomerId), Actor));
+
+        var afterInvoice = await WithCreditServiceAsync(tenantId, service =>
+            service.GetExposureAsync(environment.CompanyId, environment.CustomerId));
+        afterInvoice.OpenReceivable.Should().Be(150m);
+        afterInvoice.Available.Should().Be(350m);
+
+        await WithPaymentServiceAsync(tenantId, service => service.PostPaymentAsync(
+            Receipt(environment, invoice.SalesInvoiceId, amount: 100m), Actor));
+
+        var afterReceipt = await WithCreditServiceAsync(tenantId, service =>
+            service.GetExposureAsync(environment.CompanyId, environment.CustomerId));
+        afterReceipt.OpenReceivable.Should().Be(50m);
+        afterReceipt.CreditLimit.Should().Be(500m);
+        afterReceipt.Available.Should().Be(450m);
+    }
+
+    [PostgreSqlFact]
+    public async Task SetCreditLimit_RequiresAReason_RejectsNegativeLimits_AndRecordsTheChange()
+    {
+        var tenantId = $"o2c-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId, openingStock: 60);
+
+        var negative = async () => await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, -5m, "Mistake", Actor));
+        await negative.Should().ThrowAsync<FinancePostingValidationException>();
+
+        var noReason = async () => await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, 100m, "  ", Actor));
+        await noReason.Should().ThrowAsync<FinancePostingValidationException>();
+
+        await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, 100m, "Trade reference checked", Actor));
+        await using (var verify = _fixture.CreateContext(tenantId))
+        {
+            var customer = await verify.Customers.SingleAsync(candidate => candidate.Id == environment.CustomerId);
+            customer.CreditLimit.Should().Be(100m);
+            customer.CreditLimitChangeReason.Should().Be("Trade reference checked");
+            customer.CreditLimitChangedBy.Should().Be(Actor);
+        }
+
+        var cleared = await WithCreditServiceAsync(tenantId, service => service.SetCreditLimitAsync(
+            environment.CompanyId, environment.CustomerId, null, "Account closed for review", Actor));
+        cleared.CreditLimit.Should().BeNull();
+        cleared.Available.Should().BeNull();
+    }
+
+    private async Task<T> WithCreditServiceAsync<T>(string tenantId, Func<CustomerCreditService, Task<T>> action)
+    {
+        await using var context = _fixture.CreateContext(tenantId);
+        var unitOfWork = new UnitOfWork(context);
+        return await action(new CustomerCreditService(
+            context, unitOfWork, Microsoft.Extensions.Logging.Abstractions.NullLogger<CustomerCreditService>.Instance));
+    }
+
     private static PostSalesOrderRequest Order(
         TestEnvironment environment, int quantity, decimal price, string key = "so-1") => new(
         environment.CompanyId,

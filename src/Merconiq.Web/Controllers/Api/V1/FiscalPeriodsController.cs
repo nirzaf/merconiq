@@ -109,6 +109,29 @@ public sealed class FiscalPeriodsController(
         return Ok(ApiResponse<FiscalPeriodResponse>.CreateSuccess(ToResponse(period)));
     }
 
+    /// <summary>
+    /// Create the year-end adjustment period (period 13) for one fiscal year. It covers the year's last day
+    /// and accepts only journals explicitly targeted at it, so corrections can post after December closes.
+    /// </summary>
+    [HttpPost("fiscal-years/{fiscalYearId:int}/adjustment-period")]
+    [Authorize(Policy = CapabilityPolicies.Administer)]
+    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> CreateAdjustmentPeriod(
+        int companyId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await authorization.CanAccessCompanyAsync(User, companyId, CompanyCapability.Administer))
+            return Forbid();
+        var actor = RequireActor();
+        if (actor is null)
+            return Unauthorized();
+
+        var period = await fiscalCalendar.CreateAdjustmentPeriodAsync(companyId, fiscalYearId, actor, cancellationToken);
+        return Ok(ApiResponse<FiscalPeriodResponse>.CreateSuccess(ToResponse(period)));
+    }
+
     private string? RequireActor() =>
         string.IsNullOrWhiteSpace(User.Identity?.Name) ? null : User.Identity!.Name;
 
@@ -131,7 +154,8 @@ public sealed class FiscalPeriodsController(
         period.ClosedBy,
         period.ReopenedAtUtc,
         period.ReopenedBy,
-        period.ReopenReason);
+        period.ReopenReason,
+        period.IsAdjustment);
 }
 
 /// <summary>Fiscal-year creation fields; ownership is taken from the route and session.</summary>
@@ -170,4 +194,5 @@ public sealed record FiscalPeriodResponse(
     string? ClosedBy,
     DateTime? ReopenedAtUtc,
     string? ReopenedBy,
-    string? ReopenReason);
+    string? ReopenReason,
+    bool IsAdjustment);

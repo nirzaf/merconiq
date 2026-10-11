@@ -216,6 +216,371 @@ public sealed class PosRetailPostgreSqlTests
         });
     }
 
+    [PostgreSqlFact]
+    public async Task Receipt_ReflectsTheCommittedSaleLinesTotalsAndTenders()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var saleId = await WithServiceAsync(tenantId, async service =>
+        {
+            var register = await service.CreateRegisterAsync(
+                environment.CompanyId, environment.LocationId, "Front till", Actor);
+            var shift = await service.OpenShiftAsync(
+                new OpenPosShiftRequest(environment.CompanyId, register.Id, OpeningFloat: 100m), Actor);
+            var sale = await service.PostSaleAsync(
+                Sale(environment, register.Id, shift.Id, quantity: 2, price: 15m, cash: 20m, card: 10m),
+                environment.MutationScope,
+                Actor);
+            return sale.PosSaleId;
+        });
+
+        await using var context = _fixture.CreateContext(tenantId);
+        var receipt = await new PosReceiptService(context)
+            .GetSaleReceiptAsync(environment.CompanyId, saleId);
+
+        receipt.Should().NotBeNull();
+        var item = await context.Items.SingleAsync(candidate => candidate.Id == environment.ItemId);
+        receipt!.CompanyName.Should().Be("POS test company");
+        receipt.RegisterName.Should().Be("Front till");
+        receipt.Total.Should().Be(30m);
+        receipt.Lines.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new PosReceiptLine(item.ItemCode, "Retail item", 2, 15m, 30m));
+        receipt.Tenders.Select(tender => (tender.MethodName, tender.Amount)).Should().Equal(
+            ("Cash", 20m),
+            ("Bank transfer", 10m));
+
+        var text = PosReceiptFormatter.Format(receipt);
+        text.Should().Contain($"POS-{saleId}");
+        text.Should().Contain(item.ItemCode);
+        text.Split('\n').Should().OnlyContain(line => line.Length <= PosReceiptFormatter.DefaultWidth);
+    }
+
+    [PostgreSqlFact]
+    public async Task Receipt_ForASaleOutsideTheTenant_IsAbsent()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var saleId = await WithServiceAsync(tenantId, async service =>
+        {
+            var register = await service.CreateRegisterAsync(
+                environment.CompanyId, environment.LocationId, "Front till", Actor);
+            var shift = await service.OpenShiftAsync(
+                new OpenPosShiftRequest(environment.CompanyId, register.Id, OpeningFloat: 100m), Actor);
+            var sale = await service.PostSaleAsync(
+                Sale(environment, register.Id, shift.Id, quantity: 1, price: 15m, cash: 15m, card: 0m),
+                environment.MutationScope,
+                Actor);
+            return sale.PosSaleId;
+        });
+
+        await using var otherTenant = _fixture.CreateContext($"pos-other-{Guid.NewGuid():N}");
+        var receipt = await new PosReceiptService(otherTenant)
+            .GetSaleReceiptAsync(environment.CompanyId, saleId);
+
+        receipt.Should().BeNull("a sale in another tenant must not be readable");
+    }
+
+    [PostgreSqlFact]
+    public async Task CardSettlement_MatchesCardTendersAndReportsWhatIsStillAwaiting()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, shiftId) = await OpenTillAsync(tenantId, environment);
+        var tenderId = await CardSaleTenderIdAsync(tenantId, environment, registerId, shiftId, quantity: 2, price: 15m, key: "card-1");
+
+        var batch = await WithCardSettlementAsync(tenantId, service => service.ImportBatchAsync(
+            new CardSettlementBatchImportRequest(environment.CompanyId, "PROC-BATCH-1", Today(), 30m, 0.5m), Actor));
+        batch.NetAmount.Should().Be(29.5m);
+
+        var before = await WithCardSettlementAsync(tenantId, service => service.GetReconciliationAsync(environment.CompanyId, batch.Id));
+        before!.MatchedAmount.Should().Be(0m);
+        before.UnmatchedGrossAmount.Should().Be(30m);
+        before.IsFullySettled.Should().BeFalse();
+        before.AwaitingTenders.Should().ContainSingle().Which.PosSaleTenderId.Should().Be(tenderId);
+
+        await WithCardSettlementAsync(tenantId, service => service.MatchTenderAsync(environment.CompanyId, batch.Id, tenderId, Actor));
+
+        var after = await WithCardSettlementAsync(tenantId, service => service.GetReconciliationAsync(environment.CompanyId, batch.Id));
+        after!.MatchedAmount.Should().Be(30m);
+        after.IsFullySettled.Should().BeTrue();
+        after.AwaitingTenders.Should().BeEmpty();
+    }
+
+    [PostgreSqlFact]
+    public async Task CardSettlement_RejectsOverSettlementCashTendersAndSettlementsBeforeTheSale()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, shiftId) = await OpenTillAsync(tenantId, environment);
+        var firstTender = await CardSaleTenderIdAsync(tenantId, environment, registerId, shiftId, quantity: 2, price: 15m, key: "card-a");
+        var secondTender = await CardSaleTenderIdAsync(tenantId, environment, registerId, shiftId, quantity: 1, price: 15m, key: "card-b");
+        var cashTender = await CashSaleTenderIdAsync(tenantId, environment, registerId, shiftId, key: "cash-a");
+
+        var batch = await WithCardSettlementAsync(tenantId, service => service.ImportBatchAsync(
+            new CardSettlementBatchImportRequest(environment.CompanyId, "PROC-BATCH-2", Today(), 30m, 0m), Actor));
+        await WithCardSettlementAsync(tenantId, service => service.MatchTenderAsync(environment.CompanyId, batch.Id, firstTender, Actor));
+
+        var overSettle = async () => await WithCardSettlementAsync(tenantId, service =>
+            service.MatchTenderAsync(environment.CompanyId, batch.Id, secondTender, Actor));
+        (await overSettle.Should().ThrowAsync<FinancePostingValidationException>())
+            .WithMessage("*remaining gross*");
+
+        var cash = async () => await WithCardSettlementAsync(tenantId, service =>
+            service.MatchTenderAsync(environment.CompanyId, batch.Id, cashTender, Actor));
+        (await cash.Should().ThrowAsync<FinancePostingValidationException>())
+            .WithMessage("*Only card tenders*");
+
+        var earlier = await WithCardSettlementAsync(tenantId, service => service.ImportBatchAsync(
+            new CardSettlementBatchImportRequest(environment.CompanyId, "PROC-BATCH-0", Today().AddDays(-1), 15m, 0m), Actor));
+        var beforeSale = async () => await WithCardSettlementAsync(tenantId, service =>
+            service.MatchTenderAsync(environment.CompanyId, earlier.Id, secondTender, Actor));
+        (await beforeSale.Should().ThrowAsync<FinancePostingValidationException>())
+            .WithMessage("*after the batch settlement date*");
+    }
+
+    [PostgreSqlFact]
+    public async Task CardSettlement_UnmatchNeedsAReason_KeepsHistory_AndAllowsSettlingAgain()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, shiftId) = await OpenTillAsync(tenantId, environment);
+        var tenderId = await CardSaleTenderIdAsync(tenantId, environment, registerId, shiftId, quantity: 1, price: 15m, key: "card-u");
+        var batch = await WithCardSettlementAsync(tenantId, service => service.ImportBatchAsync(
+            new CardSettlementBatchImportRequest(environment.CompanyId, "PROC-BATCH-3", Today(), 15m, 0m), Actor));
+        await WithCardSettlementAsync(tenantId, service => service.MatchTenderAsync(environment.CompanyId, batch.Id, tenderId, Actor));
+
+        var noReason = async () => await WithCardSettlementAsync(tenantId, service =>
+            service.UnmatchTenderAsync(environment.CompanyId, batch.Id, tenderId, "  ", Actor));
+        await noReason.Should().ThrowAsync<FinancePostingValidationException>();
+
+        await WithCardSettlementAsync(tenantId, service =>
+            service.UnmatchTenderAsync(environment.CompanyId, batch.Id, tenderId, "Processor reversed the batch line", "reviewer"));
+        var withdrawn = await WithCardSettlementAsync(tenantId, service => service.GetReconciliationAsync(environment.CompanyId, batch.Id));
+        withdrawn!.MatchedAmount.Should().Be(0m);
+        withdrawn.AwaitingTenders.Should().ContainSingle();
+
+        await WithCardSettlementAsync(tenantId, service => service.MatchTenderAsync(environment.CompanyId, batch.Id, tenderId, Actor));
+
+        await using var verify = _fixture.CreateContext(tenantId);
+        var history = await verify.CardSettlementMatches.OrderBy(match => match.Id).ToListAsync(CancellationToken.None);
+        history.Should().HaveCount(2);
+        history[0].IsActive.Should().BeFalse();
+        history[0].UnmatchReason.Should().Be("Processor reversed the batch line");
+        history[1].IsActive.Should().BeTrue();
+    }
+
+    [PostgreSqlFact]
+    public async Task CardSettlement_IsInvisibleToOtherTenants()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var batch = await WithCardSettlementAsync(tenantId, service => service.ImportBatchAsync(
+            new CardSettlementBatchImportRequest(environment.CompanyId, "PROC-PRIVATE", Today(), 10m, 0m), Actor));
+
+        var otherTenant = $"pos-other-{Guid.NewGuid():N}";
+        var listed = await WithCardSettlementAsync(otherTenant, service => service.ListBatchesAsync(environment.CompanyId));
+        listed.Should().BeEmpty();
+        var reconciliation = await WithCardSettlementAsync(otherTenant, service =>
+            service.GetReconciliationAsync(environment.CompanyId, batch.Id));
+        reconciliation.Should().BeNull();
+    }
+
+    private static DateOnly Today() => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    private async Task<(int RegisterId, int ShiftId)> OpenTillAsync(string tenantId, TestEnvironment environment)
+    {
+        return await WithServiceAsync(tenantId, async service =>
+        {
+            var register = await service.CreateRegisterAsync(environment.CompanyId, environment.LocationId, "Card till", Actor);
+            var shift = await service.OpenShiftAsync(
+                new OpenPosShiftRequest(environment.CompanyId, register.Id, OpeningFloat: 0m), Actor);
+            return (register.Id, shift.Id);
+        });
+    }
+
+    private async Task<int> CardSaleTenderIdAsync(
+        string tenantId,
+        TestEnvironment environment,
+        int registerId,
+        int shiftId,
+        int quantity,
+        decimal price,
+        string key)
+    {
+        var total = quantity * price;
+        var sale = await WithServiceAsync(tenantId, service => service.PostSaleAsync(
+            new PostPosSaleRequest(
+                environment.CompanyId,
+                registerId,
+                shiftId,
+                key,
+                [new PostPosSaleLine(environment.ItemId, quantity, price)],
+                [new PostPosTender(PaymentMethod.Card, total)]),
+            environment.MutationScope,
+            Actor));
+        return await TenderIdAsync(tenantId, sale.PosSaleId, PaymentMethod.Card);
+    }
+
+    private async Task<int> CashSaleTenderIdAsync(
+        string tenantId,
+        TestEnvironment environment,
+        int registerId,
+        int shiftId,
+        string key)
+    {
+        var sale = await WithServiceAsync(tenantId, service => service.PostSaleAsync(
+            new PostPosSaleRequest(
+                environment.CompanyId,
+                registerId,
+                shiftId,
+                key,
+                [new PostPosSaleLine(environment.ItemId, 1, 15m)],
+                [new PostPosTender(PaymentMethod.Cash, 15m)]),
+            environment.MutationScope,
+            Actor));
+        return await TenderIdAsync(tenantId, sale.PosSaleId, PaymentMethod.Cash);
+    }
+
+    private async Task<int> TenderIdAsync(string tenantId, int saleId, PaymentMethod method)
+    {
+        await using var context = _fixture.CreateContext(tenantId);
+        var tender = await context.PosSaleTenders.SingleAsync(
+            candidate => candidate.PosSaleId == saleId && candidate.Method == method,
+            CancellationToken.None);
+        return tender.Id;
+    }
+
+    private async Task<T> WithCardSettlementAsync<T>(string tenantId, Func<CardSettlementService, Task<T>> action)
+    {
+        await using var context = _fixture.CreateContext(tenantId);
+        var unitOfWork = new UnitOfWork(context);
+        return await action(new CardSettlementService(
+            context, unitOfWork, Microsoft.Extensions.Logging.Abstractions.NullLogger<CardSettlementService>.Instance));
+    }
+
+    [PostgreSqlFact]
+    public async Task TillApproval_VarianceAboveThreshold_HoldsTheCloseAndBlocksSalesUntilApproved()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, shiftId) = await OpenTillAsync(tenantId, environment);
+        await WithTillApprovalAsync(tenantId, service => service.SetVarianceThresholdAsync(
+            environment.CompanyId, registerId, 2m, Actor));
+        await WithServiceAsync(tenantId, service => service.PostSaleAsync(
+            Sale(environment, registerId, shiftId, quantity: 2, price: 15m, cash: 30m, card: 0m), environment.MutationScope, Actor));
+
+        var held = await WithServiceAsync(tenantId, service => service.CloseShiftAsync(
+            new ClosePosShiftRequest(environment.CompanyId, shiftId, CountedCash: 25m), Actor));
+
+        held.ApprovalRequired.Should().BeTrue();
+        held.OverShortJournalNumber.Should().BeNull("nothing posts until a reviewer approves");
+        (await TrialBalanceAsync(tenantId, environment.CompanyId)).Rows.Should().NotContain(row => row.AccountCode == "9100");
+
+        var sale = async () => await WithServiceAsync(tenantId, service => service.PostSaleAsync(
+            Sale(environment, registerId, shiftId, quantity: 1, price: 15m, cash: 15m, card: 0m, key: "pos-held"),
+            environment.MutationScope, Actor));
+        await sale.Should().ThrowAsync<FinancePostingValidationException>();
+
+        var secondClose = async () => await WithServiceAsync(tenantId, service => service.CloseShiftAsync(
+            new ClosePosShiftRequest(environment.CompanyId, shiftId, CountedCash: 25m), Actor));
+        (await secondClose.Should().ThrowAsync<FinancePostingConflictException>()).WithMessage("*awaiting approval*");
+
+        var approved = await WithTillApprovalAsync(tenantId, service => service.ApproveCloseAsync(
+            environment.CompanyId, shiftId, "supervisor"));
+        approved.Status.Should().Be(PosShiftStatus.Closed);
+        approved.OverShortValue.Should().Be(-5m);
+        approved.OverShortJournalNumber.Should().StartWith("JV");
+        approved.ApprovedBy.Should().Be("supervisor");
+
+        var trialBalance = await TrialBalanceAsync(tenantId, environment.CompanyId);
+        trialBalance.Rows.Single(row => row.AccountCode == "9100").Debit.Should().Be(5m, "cash short expense");
+        trialBalance.TotalDebit.Should().Be(trialBalance.TotalCredit);
+
+        var again = async () => await WithTillApprovalAsync(tenantId, service => service.ApproveCloseAsync(
+            environment.CompanyId, shiftId, "supervisor"));
+        await again.Should().ThrowAsync<FinancePostingConflictException>();
+    }
+
+    [PostgreSqlFact]
+    public async Task TillApproval_RejectReturnsTheShiftToTheCashierWithAReason()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, shiftId) = await OpenTillAsync(tenantId, environment);
+        await WithTillApprovalAsync(tenantId, service => service.SetVarianceThresholdAsync(
+            environment.CompanyId, registerId, 2m, Actor));
+        await WithServiceAsync(tenantId, service => service.CloseShiftAsync(
+            new ClosePosShiftRequest(environment.CompanyId, shiftId, CountedCash: 25m), Actor));
+
+        var noReason = async () => await WithTillApprovalAsync(tenantId, service => service.RejectCloseAsync(
+            environment.CompanyId, shiftId, "   ", "supervisor"));
+        await noReason.Should().ThrowAsync<FinancePostingValidationException>();
+
+        var rejected = await WithTillApprovalAsync(tenantId, service => service.RejectCloseAsync(
+            environment.CompanyId, shiftId, "Recount: a note was misplaced", "supervisor"));
+        rejected.Status.Should().Be(PosShiftStatus.Open);
+        rejected.RejectionReason.Should().Be("Recount: a note was misplaced");
+
+        var sale = await WithServiceAsync(tenantId, service => service.PostSaleAsync(
+            Sale(environment, registerId, shiftId, quantity: 1, price: 15m, cash: 15m, card: 0m, key: "after-reject"),
+            environment.MutationScope, Actor));
+        sale.TotalValue.Should().Be(15m, "the shift transacts again after the rejection");
+
+        var approve = async () => await WithTillApprovalAsync(tenantId, service => service.ApproveCloseAsync(
+            environment.CompanyId, shiftId, "supervisor"));
+        await approve.Should().ThrowAsync<FinancePostingConflictException>();
+    }
+
+    [PostgreSqlFact]
+    public async Task TillApproval_VarianceWithinThreshold_ClosesImmediately()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, shiftId) = await OpenTillAsync(tenantId, environment);
+        await WithTillApprovalAsync(tenantId, service => service.SetVarianceThresholdAsync(
+            environment.CompanyId, registerId, 10m, Actor));
+        await WithServiceAsync(tenantId, service => service.PostSaleAsync(
+            Sale(environment, registerId, shiftId, quantity: 2, price: 15m, cash: 30m, card: 0m), environment.MutationScope, Actor));
+
+        var close = await WithServiceAsync(tenantId, service => service.CloseShiftAsync(
+            new ClosePosShiftRequest(environment.CompanyId, shiftId, CountedCash: 25m), Actor));
+
+        close.ApprovalRequired.Should().BeFalse();
+        close.OverShortJournalNumber.Should().StartWith("JV");
+    }
+
+    [PostgreSqlFact]
+    public async Task TillApproval_ThresholdMustBeNonNegative()
+    {
+        var tenantId = $"pos-{Guid.NewGuid():N}";
+        var environment = await CreateEnvironmentAsync(tenantId);
+        var (registerId, _) = await OpenTillAsync(tenantId, environment);
+
+        var negative = async () => await WithTillApprovalAsync(tenantId, service => service.SetVarianceThresholdAsync(
+            environment.CompanyId, registerId, -1m, Actor));
+
+        await negative.Should().ThrowAsync<FinancePostingValidationException>();
+    }
+
+    private async Task<T> WithTillApprovalAsync<T>(string tenantId, Func<TillApprovalService, Task<T>> action)
+    {
+        await using var context = _fixture.CreateContext(tenantId);
+        // One unit of work must back both services, as it does under dependency injection, so the
+        // posting joins the approval transaction instead of opening a second one.
+        var unitOfWork = new UnitOfWork(context);
+        var fiscalCalendar = new FiscalCalendarService(
+            context, unitOfWork, Microsoft.Extensions.Logging.Abstractions.NullLogger<FiscalCalendarService>.Instance);
+        var journal = new JournalPostingService(
+            context, unitOfWork, fiscalCalendar, new DocumentNumberService(context, unitOfWork),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<JournalPostingService>.Instance);
+        return await action(new TillApprovalService(
+            context,
+            unitOfWork,
+            new AccountPostingPolicyService(context),
+            journal,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<TillApprovalService>.Instance));
+    }
+
     private static PostPosSaleRequest Sale(
         TestEnvironment environment, int registerId, int shiftId,
         int quantity, decimal price, decimal cash, decimal card, string key = "pos-key-1")

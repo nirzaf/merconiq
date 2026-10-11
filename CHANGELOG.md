@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - POS retail session management, sales receipts, and refunds with automated stock and ledger posting.
 - Bounded supplier and customer credit notes with inventory restock and ledger adjustments.
 - Ledger-backed financial statements (Profit & Loss and Balance Sheet) derived from journal lines.
+- Account-hierarchy rollups on the Profit & Loss and Balance Sheet for classified group accounts.
+- Year-end adjustment period (period 13) that accepts only journals explicitly targeted at the fiscal year end.
+- Per-period posting locks on individual chart accounts, enforced by the posting kernel, reversals included.
+- Bank statement import with reviewed one-to-one matching and a reconciliation report.
+- Fixed assets: register, capitalization, monthly straight-line depreciation with replay-safe runs, and disposal with gain or loss.
+- Employee expense claims: submit, approve (posts against the employee payable), reject with reason, and pay from the bank.
+- Customer credit limits, with invoice blocking over the limit and reviewer overrides that record a reason.
+- POS plain-text receipts, card tender settlement against acquirer batches, and till approval for cash variances above a register threshold.
+- CRM leads, opportunities and activities, with stage rules and a pipeline summary.
+
+### Fixed
+
+- The Docker build stages use the SDK pinned by `global.json` (10.0.300).
 
 ### Changed
 
@@ -22,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed the .NET solution, projects, assemblies, and root namespaces.
 - Updated application, documentation, CI/CD, and container branding.
 - Merconiq is now the platform identity; Inventory remains a business domain.
+- The profit-and-loss and balance-sheet responses now carry `rollups`; existing fields are unchanged.
+- Journal request hashes are unchanged for regular postings; only requests targeted at period 13 hash the target.
 
 ## [1.0.0] - 2026-06-12
 
