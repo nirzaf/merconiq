@@ -11,7 +11,7 @@ published artifact remains a separate owner-authorized action.
 |---|---|
 | Candidate label | `v<owner-approved-version>-rc.1` (not created) |
 | Candidate commit | Record the full SHA after the preparation PR merges; current baseline is `b1646978f51ac7493d70e1b701685d0e8fd7b7f2` |
-| Runtime | .NET SDK 10.0.401; PostgreSQL 16; Docker Linux containers for Compose/Testcontainers |
+| Runtime | .NET SDK 10.0.300; PostgreSQL 16; Docker Linux containers for Compose/Testcontainers |
 | Supported image architectures | `linux/amd64` and `linux/arm64` are configured; platform smoke evidence is required before calling either validated |
 | Publication state | `release candidate prepared; publication pending` |
 
