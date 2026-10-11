@@ -18,5 +18,6 @@ public enum AccountPostingRole
     TaxPayable = 8,
     Rounding = 9,
     OpeningEquity = 10,
-    StockInTransit = 11
+    StockInTransit = 11,
+    CashOverShort = 12
 }

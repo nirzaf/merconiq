@@ -48,6 +48,7 @@ public static class ApplicationServiceExtensions
         services.AddScoped<IPurchaseInvoiceService, Merconiq.Infrastructure.Services.PurchaseInvoiceService>();
         services.AddScoped<IPaymentService, Merconiq.Infrastructure.Services.PaymentService>();
         services.AddScoped<ISalesService, Merconiq.Infrastructure.Services.SalesService>();
+        services.AddScoped<IPosService, Merconiq.Infrastructure.Services.PosService>();
 
         services.AddOptions<ForecastingOptions>()
             .Bind(configuration.GetSection(ForecastingOptions.SectionName))

@@ -228,6 +228,18 @@ The purchase-order obligations view now derives received, rejected and
 outstanding quantities from posted receipt lines, and sales-order progress
 derives from posted delivery lines.
 
+### Point-of-sale APIs
+
+Registers (`POST .../pos/registers`, `Administer`), cashier shifts
+(`POST .../pos/shifts/open`, `Post`), checkouts (`POST .../pos/sales`, `Post`),
+refunds (`POST .../pos/refunds`, `Post`) and shift close
+(`POST .../pos/shifts/{id}/close`, `Post`) run on real stock and the finance
+kernel. Checkouts require an `Idempotency-Key`, issue valued stock, and post
+tender/revenue/COGS journals atomically; only open shifts transact. Refunds are
+bounded by the sold-minus-refunded balance per line. Shift close reconciles
+counted cash against the drawer derived from tenders and posts any variance to
+the cash over/short account exactly once.
+
 ### Tenant unit source-ID export
 
 `GET /api/v1/organization/units/export` requires an API JWT and the tenant

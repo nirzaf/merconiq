@@ -142,6 +142,15 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SalesInvoice> SalesInvoices { get; set; } = null!;
     public DbSet<SalesInvoiceLine> SalesInvoiceLines { get; set; } = null!;
 
+    /// <summary>Point-of-sale registers, shifts, checkouts and refunds.</summary>
+    public DbSet<PosRegister> PosRegisters { get; set; } = null!;
+    public DbSet<PosShift> PosShifts { get; set; } = null!;
+    public DbSet<PosSale> PosSales { get; set; } = null!;
+    public DbSet<PosSaleLine> PosSaleLines { get; set; } = null!;
+    public DbSet<PosSaleTender> PosSaleTenders { get; set; } = null!;
+    public DbSet<PosRefund> PosRefunds { get; set; } = null!;
+    public DbSet<PosRefundLine> PosRefundLines { get; set; } = null!;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureAuditLogsAreAppendOnly();
@@ -2058,6 +2067,182 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(line => line.DeliveryNoteLine)
                 .WithMany()
                 .HasForeignKey(line => line.DeliveryNoteLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosRegister>(entity =>
+        {
+            entity.HasQueryFilter(register => register.TenantId == CurrentTenantId);
+            entity.Property(register => register.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(register => register.Name).HasMaxLength(100).IsRequired();
+            entity.HasIndex(register => new { register.TenantId, register.CompanyId, register.Name }).IsUnique();
+            entity.HasOne(register => register.Location)
+                .WithMany()
+                .HasForeignKey(register => new { register.LocationId, register.TenantId })
+                .HasPrincipalKey(location => new { location.Id, location.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(register => new { register.CompanyId, register.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosShift>(entity =>
+        {
+            entity.HasQueryFilter(shift => shift.TenantId == CurrentTenantId);
+            entity.Property(shift => shift.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(shift => shift.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(shift => shift.OpenedBy).HasMaxLength(256).IsRequired();
+            entity.Property(shift => shift.ClosedBy).HasMaxLength(256);
+            entity.Property(shift => shift.OpeningFloat).HasColumnType("decimal(18,6)");
+            entity.Property(shift => shift.CountedCash).HasColumnType("decimal(18,6)");
+            entity.Property(shift => shift.ExpectedCash).HasColumnType("decimal(18,6)");
+            entity.Property(shift => shift.OverShortValue).HasColumnType("decimal(18,6)");
+            entity.HasIndex(shift => new { shift.TenantId, shift.RegisterId, shift.Status });
+            entity.HasOne(shift => shift.Register)
+                .WithMany()
+                .HasForeignKey(shift => new { shift.RegisterId, shift.TenantId })
+                .HasPrincipalKey(register => new { register.Id, register.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(shift => new { shift.CompanyId, shift.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosSale>(entity =>
+        {
+            entity.HasQueryFilter(sale => sale.TenantId == CurrentTenantId);
+            entity.Property(sale => sale.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(sale => sale.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(sale => sale.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(sale => sale.TotalValue).HasColumnType("decimal(18,6)");
+            entity.Property(sale => sale.SoldBy).HasMaxLength(256).IsRequired();
+            entity.HasAlternateKey(sale => new { sale.Id, sale.TenantId });
+            entity.HasIndex(sale => new { sale.TenantId, sale.CompanyId, sale.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_PosSales_RequestKey");
+            entity.HasIndex(sale => new { sale.TenantId, sale.ShiftId });
+            entity.HasOne(sale => sale.Register)
+                .WithMany()
+                .HasForeignKey(sale => new { sale.RegisterId, sale.TenantId })
+                .HasPrincipalKey(register => new { register.Id, register.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(sale => sale.Shift)
+                .WithMany()
+                .HasForeignKey(sale => new { sale.ShiftId, sale.TenantId })
+                .HasPrincipalKey(shift => new { shift.Id, shift.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(sale => sale.Customer)
+                .WithMany()
+                .HasForeignKey(sale => sale.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(sale => new { sale.CompanyId, sale.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosSaleLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.UnitPrice).HasColumnType("decimal(18,6)");
+            entity.Property(line => line.LineValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("PosSaleLines", table => table.HasCheckConstraint(
+                "CK_PosSaleLines_Values",
+                "\"Quantity\" > 0 AND \"UnitPrice\" >= 0 AND \"LineValue\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.PosSaleId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.StockTransactionId }).IsUnique();
+            entity.HasOne(line => line.PosSale)
+                .WithMany(sale => sale.Lines)
+                .HasForeignKey(line => new { line.PosSaleId, line.TenantId })
+                .HasPrincipalKey(sale => new { sale.Id, sale.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.StockTransaction)
+                .WithMany()
+                .HasForeignKey(line => new { line.StockTransactionId, line.TenantId })
+                .HasPrincipalKey(transaction => new { transaction.Id, transaction.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(line => new { line.CompanyId, line.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosSaleTender>(entity =>
+        {
+            entity.HasQueryFilter(tender => tender.TenantId == CurrentTenantId);
+            entity.Property(tender => tender.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(tender => tender.Method).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(tender => tender.Amount).HasColumnType("decimal(18,6)");
+            entity.HasIndex(tender => new { tender.TenantId, tender.PosSaleId, tender.LineNumber }).IsUnique();
+            entity.HasOne(tender => tender.PosSale)
+                .WithMany(sale => sale.Tenders)
+                .HasForeignKey(tender => new { tender.PosSaleId, tender.TenantId })
+                .HasPrincipalKey(sale => new { sale.Id, sale.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(tender => new { tender.CompanyId, tender.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosRefund>(entity =>
+        {
+            entity.HasQueryFilter(refund => refund.TenantId == CurrentTenantId);
+            entity.Property(refund => refund.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(refund => refund.RequestKey).HasMaxLength(200).IsRequired();
+            entity.Property(refund => refund.RequestHash).HasMaxLength(64).IsRequired();
+            entity.Property(refund => refund.TotalValue).HasColumnType("decimal(18,6)");
+            entity.Property(refund => refund.RefundedBy).HasMaxLength(256).IsRequired();
+            entity.Property(refund => refund.Reason).HasMaxLength(500).IsRequired();
+            entity.HasAlternateKey(refund => new { refund.Id, refund.TenantId });
+            entity.HasIndex(refund => new { refund.TenantId, refund.CompanyId, refund.RequestKey })
+                .IsUnique()
+                .HasDatabaseName("UX_PosRefunds_RequestKey");
+            entity.HasIndex(refund => new { refund.TenantId, refund.OriginalPosSaleId });
+            entity.HasOne(refund => refund.OriginalPosSale)
+                .WithMany()
+                .HasForeignKey(refund => new { refund.OriginalPosSaleId, refund.TenantId })
+                .HasPrincipalKey(sale => new { sale.Id, sale.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(refund => new { refund.CompanyId, refund.TenantId })
+                .HasPrincipalKey(company => new { company.Id, company.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PosRefundLine>(entity =>
+        {
+            entity.HasQueryFilter(line => line.TenantId == CurrentTenantId);
+            entity.Property(line => line.TenantId).HasMaxLength(64).IsRequired();
+            entity.Property(line => line.Disposition).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(line => line.RefundValue).HasColumnType("decimal(18,6)");
+            entity.ToTable("PosRefundLines", table => table.HasCheckConstraint(
+                "CK_PosRefundLines_Quantity",
+                "\"Quantity\" > 0 AND \"RefundValue\" >= 0"));
+            entity.HasIndex(line => new { line.TenantId, line.PosRefundId, line.LineNumber }).IsUnique();
+            entity.HasIndex(line => new { line.TenantId, line.PosSaleLineId });
+            entity.HasOne(line => line.PosRefund)
+                .WithMany(refund => refund.Lines)
+                .HasForeignKey(line => new { line.PosRefundId, line.TenantId })
+                .HasPrincipalKey(refund => new { refund.Id, refund.TenantId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(line => line.PosSaleLine)
+                .WithMany()
+                .HasForeignKey(line => line.PosSaleLineId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Company>()
                 .WithMany()

@@ -35,6 +35,8 @@ Welcome to the documentation site for **Merconiq** — a modern inventory manage
 | **[Organization ownership](ORGANIZATION_OWNERSHIP.md)** | Maintainers | Tenant, company, branch, location and document ownership, including unknown legacy mappings. |
 | **[Architecture boundaries](ARCHITECTURE.md)** | Developers | Modular-monolith ownership, dependency direction, and extension rules. |
 | **[Finance posting kernel](FINANCE_POSTING.md)** | Developers & reviewers | Fiscal-period controls, immutable balanced journals, source-action idempotency, reversals and trial balance. |
+| **[Acceptance scenarios](ACCEPTANCE_SCENARIOS.md)** | Reviewers & maintainers | Canonical golden fixture, kernel invariants and executable scenario map. |
+| **[ERPNext capability parity](ERPNEXT_PARITY.md)** | Product owners | Honest version-pinned Supported/Partial/Planned/Excluded classification. |
 | **[Repository and artifact cutover](REPOSITORY_CUTOVER.md)** | Maintainers & operators | Canonical links, current Pages reachability, GHCR evidence, legacy references, and Compose volume precautions. |
 
 ---
