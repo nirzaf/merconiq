@@ -48,7 +48,13 @@ public sealed record PostPaymentRequest(
     int? CustomerId = null,
     DateOnly? PostingDate = null,
     string? Reference = null,
-    string? Notes = null);
+    string? Notes = null,
+    /// <summary>Unallocated money paid to (or received from) the party; reduces their open balance.</summary>
+    bool IsAdvance = false,
+    /// <summary>Internal transfers only: the account money leaves.</summary>
+    int? FromAccountId = null,
+    /// <summary>Internal transfers only: the account money arrives in.</summary>
+    int? ToAccountId = null);
 
 /// <summary>The committed-or-replayed payment outcome.</summary>
 public sealed record PaymentResult(

@@ -7,7 +7,10 @@ public enum PaymentEntryType
     Pay = 0,
 
     /// <summary>Money received from a customer against receivables.</summary>
-    Receive = 1
+    Receive = 1,
+
+    /// <summary>Money moved between two of the company's own accounts; no party involved.</summary>
+    InternalTransfer = 2
 }
 
 /// <summary>Tender recorded for a payment; the posting policy maps it to a control account.</summary>

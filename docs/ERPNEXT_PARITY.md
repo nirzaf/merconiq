@@ -21,11 +21,11 @@ suites that prove them. See `docs/ACCEPTANCE_SCENARIOS.md` for the scenario fixt
 | Order-to-cash | **Supported** | Sales order (no posting) → delivery (exact moving-average COGS) → sales invoice (revenue + AR) → customer receipt; over-delivery, double-matching, over-allocation rejected — `SalesOrderToCashPostgreSqlTests`. |
 | Point of sale | **Partial** | Registers, shifts, idempotent mixed-tender checkout with exact COGS, bounded refunds, cash over/short close — `PosRetailPostgreSqlTests`. Offline mode, receipt PDF/printing, card-settlement reconciliation, till-approval workflow remain open. |
 | Stock / warehouse | **Partial** | Receive/transfer/sell/return, counts, reservations, quarantine, lot/expiry, moving-average valuation are the codebase's strongest area (pre-existing suites); serial-number tracking, QC holds and FIFO/lot costing are not implemented. |
-| Payment / banking | **Partial** | Pay/receive with allocations and cash/bank journals; unapplied advances, internal transfers and bank-statement reconciliation are not implemented. |
+| Payment / banking | **Partial** | Pay/receive with allocations, party-level advances (which reduce open balances and cap allocations), and internal transfers between posting accounts; bank-statement reconciliation and advance-to-invoice allocation are not implemented. |
 | Purchase returns / credit notes | **Supported** | Supplier credit notes bounded by accepted-minus-returned, stock issued back, Dr AP / Cr Inventory; invoice-matched receipt lines rejected — `CreditNotesAndStatementsPostgreSqlTests`. |
 | Sales returns / credit notes | **Supported** | Sales credit notes bounded by delivered-minus-returned with restock dispositions, Dr Sales / Cr AR plus COGS reversal — `CreditNotesAndStatementsPostgreSqlTests`. |
 | Price lists, taxes on documents | **Planned** | Tax-rule configuration and deterministic amount calculation exist; effective-dated tax journals on sales/purchase documents are not wired. |
-| Quotations, credit control | **Planned** | TS-11/TS-12 residuals; customer master with payment terms exists. |
+| Quotations, credit control | **Partial** | Quotations with validity windows convert boundedly and idempotently into sales orders (`AgingAndQuotationPostgreSqlTests`); credit limits/override control remain open. |
 | CRM, portals | **Planned** | TS-16 (#308–#311). |
 | Assets / depreciation, expenses | **Planned** | TS-17 (#312–#315). |
 | Projects, timesheets, SLA | **Planned** | TS-18 (#317–#322). |

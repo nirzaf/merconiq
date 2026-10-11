@@ -117,6 +117,9 @@ public sealed class PaymentsController(
                 SupplierId: request.SupplierId,
                 CustomerId: request.CustomerId,
                 PostingDate: request.PostingDate,
+                IsAdvance: request.IsAdvance,
+                FromAccountId: request.FromAccountId,
+                ToAccountId: request.ToAccountId,
                 Reference: request.Reference,
                 Notes: request.Notes),
             actor,
@@ -159,6 +162,17 @@ public sealed class PostPaymentWriteRequest
 
     [Range(1, int.MaxValue)]
     public int? CustomerId { get; init; }
+
+    /// <summary>Post as unallocated money settled against the party.</summary>
+    public bool IsAdvance { get; init; }
+
+    /// <summary>Internal transfers only: the account money leaves.</summary>
+    [Range(1, int.MaxValue)]
+    public int? FromAccountId { get; init; }
+
+    /// <summary>Internal transfers only: the account money arrives in.</summary>
+    [Range(1, int.MaxValue)]
+    public int? ToAccountId { get; init; }
 
     [Range(0.000001, double.MaxValue)]
     public decimal Amount { get; init; }

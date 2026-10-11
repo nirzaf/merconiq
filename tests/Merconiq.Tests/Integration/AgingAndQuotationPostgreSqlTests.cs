@@ -34,7 +34,7 @@ public sealed class AgingAndQuotationPostgreSqlTests
         _fixture = fixture;
     }
 
-    [Fact]
+    [PostgreSqlFact]
     public async Task ReceivablesAging_BucketsOpenBalanceByDueDate()
     {
         var tenantId = $"agq-{Guid.NewGuid():N}";
@@ -71,7 +71,7 @@ public sealed class AgingAndQuotationPostgreSqlTests
         aging.Rows.Single().Days1To30.Should().Be(0m);
     }
 
-    [Fact]
+    [PostgreSqlFact]
     public async Task PayablesAging_BucketsOpenBalanceByDueDate()
     {
         var tenantId = $"agq-{Guid.NewGuid():N}";
@@ -111,7 +111,7 @@ public sealed class AgingAndQuotationPostgreSqlTests
         aging.Rows.Single().Days31To60.Should().Be(300m, "due 45 days ago");
     }
 
-    [Fact]
+    [PostgreSqlFact]
     public async Task Quotation_ConvertsOnce_IntoBoundedOrder_AndReplays()
     {
         var tenantId = $"agq-{Guid.NewGuid():N}";
@@ -141,7 +141,7 @@ public sealed class AgingAndQuotationPostgreSqlTests
         (await verify.SalesOrders.CountAsync()).Should().Be(1);
     }
 
-    [Fact]
+    [PostgreSqlFact]
     public async Task Quotation_Expired_CannotConvert()
     {
         var tenantId = $"agq-{Guid.NewGuid():N}";

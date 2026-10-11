@@ -2096,6 +2096,12 @@ namespace Merconiq.Infrastructure.Migrations
                     b.Property<int?>("CustomerId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("FromAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsAdvance")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Method")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -2142,6 +2148,9 @@ namespace Merconiq.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ToAccountId")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

@@ -116,7 +116,19 @@ public sealed class PaymentService(
             ?? throw new FinancePostingValidationException("Active company not found.");
 
         string partyLabel;
-        if (request.PaymentType == PaymentEntryType.Pay)
+        if (request.PaymentType == PaymentEntryType.InternalTransfer)
+        {
+            partyLabel = "internal transfer";
+            if (request.Allocations.Count > 0)
+                throw new FinancePostingValidationException("Internal transfers carry no allocations.");
+            if (request.FromAccountId is not { } fromAccountId || request.ToAccountId is not { } toAccountId)
+                throw new FinancePostingValidationException(
+                    "An internal transfer requires FromAccountId and ToAccountId.");
+            if (fromAccountId == toAccountId)
+                throw new FinancePostingValidationException(
+                    "An internal transfer must move money between two different accounts.");
+        }
+        else if (request.PaymentType == PaymentEntryType.Pay)
         {
             if (request.SupplierId is not { } supplierId || supplierId <= 0)
                 throw new FinancePostingValidationException("A supplier payment requires a SupplierId.");
@@ -139,16 +151,30 @@ public sealed class PaymentService(
         var postingDate = request.PostingDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         await fiscalCalendar.EnsurePeriodOpenForDateAsync(request.CompanyId, postingDate, cancellationToken);
 
-        // Open value derives from posted invoices minus posted allocations, including the
-        // allocations staged by this very request; the advisory lock serializes the check.
-        // For receipts the allocation's invoice id names the sales invoice being settled.
-        await ValidateAllocationsAsync(request, cancellationToken);
+        if (request.PaymentType == PaymentEntryType.InternalTransfer)
+        {
+            await RequirePostingAccountsAsync(request.CompanyId, request.FromAccountId!.Value, cancellationToken);
+            await RequirePostingAccountsAsync(request.CompanyId, request.ToAccountId!.Value, cancellationToken);
+        }
+        else if (!request.IsAdvance)
+        {
+            // Open value derives from posted invoices minus posted allocations minus party
+            // advances, including this request's own allocations; the advisory lock serializes
+            // the check. For receipts the allocation's invoice id names the sales invoice.
+            await ValidateAllocationsAsync(request, cancellationToken);
+        }
+
+        if (request.IsAdvance && request.Allocations.Count > 0)
+            throw new FinancePostingValidationException(
+                "An advance posts without allocations; allocate the advance to invoices in a later payment.");
+        if (request.IsAdvance && request.PaymentType == PaymentEntryType.InternalTransfer)
+            throw new FinancePostingValidationException("Internal transfers are never advances.");
 
         var totalAllocated = request.Allocations.Sum(allocation => allocation.Amount);
-        if (totalAllocated != request.Amount)
+        if (!request.IsAdvance && request.PaymentType != PaymentEntryType.InternalTransfer && totalAllocated != request.Amount)
             throw new FinancePostingValidationException(
                 $"The payment amount {request.Amount} must be fully allocated; allocations total {totalAllocated}. " +
-                "Unapplied advances are a future increment.");
+                "Post advances with isAdvance=true to record unallocated money.");
 
         var payment = new PaymentEntry
         {
@@ -157,6 +183,9 @@ public sealed class PaymentService(
             Method = request.Method,
             SupplierId = request.PaymentType == PaymentEntryType.Pay ? request.SupplierId : null,
             CustomerId = request.PaymentType == PaymentEntryType.Receive ? request.CustomerId : null,
+            IsAdvance = request.IsAdvance,
+            FromAccountId = request.FromAccountId,
+            ToAccountId = request.ToAccountId,
             Amount = request.Amount,
             CurrencyCode = company.BaseCurrency.ToUpperInvariant(),
             PostingDate = postingDate,
@@ -184,41 +213,9 @@ public sealed class PaymentService(
         context.PaymentEntries.Add(payment);
         await unitOfWork.SaveChangesAsAsync(actor, cancellationToken);
 
-        var tenderAccount = await postingPolicy.ResolveAsync(
-            request.CompanyId,
-            request.Method == PaymentMethod.Cash ? AccountPostingRole.CashOnHand : AccountPostingRole.Bank,
-            cancellationToken);
-        var counterAccount = await postingPolicy.ResolveAsync(
-            request.CompanyId,
-            request.PaymentType == PaymentEntryType.Pay
-                ? AccountPostingRole.AccountsPayable
-                : AccountPostingRole.AccountsReceivable,
-            cancellationToken);
-        var posted = await journalPosting.PostAsync(
-            new JournalPostingRequest(
-                request.CompanyId,
-                postingDate,
-                company.BaseCurrency,
-                request.PaymentType == PaymentEntryType.Pay
-                    ? $"Supplier payment to {partyLabel}" +
-                        (string.IsNullOrWhiteSpace(request.Reference) ? string.Empty : $" ({request.Reference})")
-                    : $"Customer receipt from {partyLabel}" +
-                        (string.IsNullOrWhiteSpace(request.Reference) ? string.Empty : $" ({request.Reference})"),
-                PaymentDocumentType,
-                payment.Id.ToString(CultureInfo.InvariantCulture),
-                "Post",
-                1,
-                request.PaymentType == PaymentEntryType.Pay
-                    ? [
-                        new JournalLineInput(counterAccount.ChartOfAccountId, $"Payable settlement {partyLabel}", request.Amount, 0m),
-                        new JournalLineInput(tenderAccount.ChartOfAccountId, request.Method == PaymentMethod.Cash ? "Cash payment" : "Bank payment", 0m, request.Amount)
-                    ]
-                    : [
-                        new JournalLineInput(tenderAccount.ChartOfAccountId, request.Method == PaymentMethod.Cash ? "Cash receipt" : "Bank receipt", request.Amount, 0m),
-                        new JournalLineInput(counterAccount.ChartOfAccountId, $"Receivable settlement {partyLabel}", 0m, request.Amount)
-                    ]),
-            actor,
-            cancellationToken);
+        var posted = request.PaymentType == PaymentEntryType.InternalTransfer
+            ? await PostTransferJournalAsync(request, payment, company, postingDate, partyLabel, actor, cancellationToken)
+            : await PostPartyJournalAsync(request, payment, company, postingDate, partyLabel, actor, cancellationToken);
 
         logger.LogInformation(
             "Payment {PaymentId} posted for company {CompanyId}: {Amount} {Direction} {PartyLabel}, journal {JournalNumber}",
@@ -248,6 +245,86 @@ public sealed class PaymentService(
             replayed);
     }
 
+    private async Task<JournalPostingResult> PostPartyJournalAsync(
+        PostPaymentRequest request,
+        PaymentEntry payment,
+        Company company,
+        DateOnly postingDate,
+        string partyLabel,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var tenderAccount = await postingPolicy.ResolveAsync(
+            request.CompanyId,
+            request.Method == PaymentMethod.Cash ? AccountPostingRole.CashOnHand : AccountPostingRole.Bank,
+            cancellationToken);
+        var counterAccount = await postingPolicy.ResolveAsync(
+            request.CompanyId,
+            request.PaymentType == PaymentEntryType.Pay
+                ? AccountPostingRole.AccountsPayable
+                : AccountPostingRole.AccountsReceivable,
+            cancellationToken);
+        var reference = string.IsNullOrWhiteSpace(request.Reference) ? string.Empty : $" ({request.Reference})";
+        var advanceLabel = request.IsAdvance ? "advance " : string.Empty;
+        return await journalPosting.PostAsync(
+            new JournalPostingRequest(
+                request.CompanyId,
+                postingDate,
+                company.BaseCurrency,
+                request.PaymentType == PaymentEntryType.Pay
+                    ? $"Supplier payment {advanceLabel}to {partyLabel}{reference}"
+                    : $"Customer receipt {advanceLabel}from {partyLabel}{reference}",
+                PaymentDocumentType,
+                payment.Id.ToString(CultureInfo.InvariantCulture),
+                "Post",
+                1,
+                request.PaymentType == PaymentEntryType.Pay
+                    ?
+                    [
+                        new JournalLineInput(counterAccount.ChartOfAccountId, $"Payable settlement {partyLabel}", request.Amount, 0m),
+                        new JournalLineInput(tenderAccount.ChartOfAccountId, request.Method == PaymentMethod.Cash ? "Cash payment" : "Bank payment", 0m, request.Amount)
+                    ]
+                    :
+                    [
+                        new JournalLineInput(tenderAccount.ChartOfAccountId, request.Method == PaymentMethod.Cash ? "Cash receipt" : "Bank receipt", request.Amount, 0m),
+                        new JournalLineInput(counterAccount.ChartOfAccountId, $"Receivable settlement {partyLabel}", 0m, request.Amount)
+                    ]),
+            actor,
+            cancellationToken);
+    }
+
+    private async Task<JournalPostingResult> PostTransferJournalAsync(
+        PostPaymentRequest request,
+        PaymentEntry payment,
+        Company company,
+        DateOnly postingDate,
+        string partyLabel,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var fromAccount = await context.ChartOfAccounts.SingleAsync(
+            account => account.Id == request.FromAccountId, cancellationToken);
+        var toAccount = await context.ChartOfAccounts.SingleAsync(
+            account => account.Id == request.ToAccountId, cancellationToken);
+        return await journalPosting.PostAsync(
+            new JournalPostingRequest(
+                request.CompanyId,
+                postingDate,
+                company.BaseCurrency,
+                $"Internal transfer from {fromAccount.Name} to {toAccount.Name}" +
+                    (string.IsNullOrWhiteSpace(request.Reference) ? string.Empty : $" ({request.Reference})"),
+                PaymentDocumentType,
+                payment.Id.ToString(CultureInfo.InvariantCulture),
+                "Post",
+                1,
+                [
+                    new JournalLineInput(toAccount.Id, $"Transfer in from {fromAccount.Name}", request.Amount, 0m),
+                    new JournalLineInput(fromAccount.Id, $"Transfer out to {toAccount.Name}", 0m, request.Amount)
+                ]),
+            actor,
+            cancellationToken);
+    }
+
     private async Task ValidateAllocationsAsync(
         PostPaymentRequest request,
         CancellationToken cancellationToken)
@@ -260,6 +337,36 @@ public sealed class PaymentService(
             .GroupBy(allocation => allocation.PurchaseInvoiceId)
             .ToDictionary(group => group.Key, group => group.Sum(allocation => allocation.Amount));
         var invoiceIds = allocationGroups.Keys.ToList();
+        var partyId = request.PaymentType == PaymentEntryType.Pay ? request.SupplierId : request.CustomerId;
+
+        // Party-level balance: invoices minus allocations minus advances. An advance is money
+        // already settled against the party, so it lowers what their invoices can still claim.
+        var partyOpen = partyId is { } openPartyId
+            ? await context.PaymentEntries
+                .Where(payment => payment.CompanyId == request.CompanyId &&
+                    payment.PaymentType == request.PaymentType &&
+                    (request.PaymentType == PaymentEntryType.Pay
+                        ? payment.SupplierId == openPartyId
+                        : payment.CustomerId == openPartyId))
+                .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m
+            : 0m;
+        var advanceTotal = partyId is { } advancePartyId
+            ? await context.PaymentEntries
+                .Where(payment => payment.CompanyId == request.CompanyId &&
+                    payment.PaymentType == request.PaymentType &&
+                    (request.PaymentType == PaymentEntryType.Pay
+                        ? payment.SupplierId == advancePartyId
+                        : payment.CustomerId == advancePartyId))
+                .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m
+            : 0m;
+        var allocatedTotal = partyId is { } allocatedPartyId
+            ? await context.PaymentAllocations
+                .Where(allocation => allocation.CompanyId == request.CompanyId &&
+                    (request.PaymentType == PaymentEntryType.Pay
+                        ? allocation.PurchaseInvoice!.SupplierId == allocatedPartyId
+                        : allocation.SalesInvoice!.CustomerId == allocatedPartyId))
+                .SumAsync(allocation => (decimal?)allocation.Amount, cancellationToken) ?? 0m
+            : 0m;
 
         if (request.PaymentType == PaymentEntryType.Pay)
         {
@@ -291,6 +398,35 @@ public sealed class PaymentService(
                 .ToDictionary(pair => pair.Key, pair => (pair.Value.InvoiceNumber, pair.Value.TotalValue)),
                 priorPaid, "sales invoice");
         }
+
+        // Party-level cap across invoices and advances.
+        var invoiceTotal = request.PaymentType == PaymentEntryType.Pay
+            ? await context.PurchaseInvoices
+                .Where(invoice => invoice.CompanyId == request.CompanyId && invoice.SupplierId == partyId)
+                .SumAsync(invoice => (decimal?)invoice.TotalValue, cancellationToken) ?? 0m
+            : await context.SalesInvoices
+                .Where(invoice => invoice.CompanyId == request.CompanyId && invoice.CustomerId == partyId)
+                .SumAsync(invoice => (decimal?)invoice.TotalValue, cancellationToken) ?? 0m;
+        var partyBalance = invoiceTotal - allocatedTotal - advanceTotal;
+        if (allocationGroups.Values.Sum() > partyBalance)
+            throw new FinancePostingValidationException(
+                $"Allocating {allocationGroups.Values.Sum()} exceeds the party's open balance of {partyBalance} " +
+                "(invoices minus settled money and advances).");
+    }
+
+    private async Task RequirePostingAccountsAsync(
+        int companyId,
+        int accountId,
+        CancellationToken cancellationToken)
+    {
+        var account = await context.ChartOfAccounts.SingleOrDefaultAsync(
+                candidate => candidate.Id == accountId && candidate.CompanyId == companyId,
+                cancellationToken)
+            ?? throw new FinancePostingValidationException(
+                $"Transfer account {accountId} does not exist in this company.");
+        if (!account.IsActive || account.IsGroupAccount)
+            throw new FinancePostingValidationException(
+                "Transfer accounts must be active posting accounts.");
     }
 
     private static async Task AssertWithinOpenAsync(
@@ -337,9 +473,19 @@ public sealed class PaymentService(
         if (request.Amount != decimal.Round(request.Amount, 6, MidpointRounding.AwayFromZero))
             throw new FinancePostingValidationException(
                 "The payment amount must already be rounded to at most 6 decimal places.");
-        if (request.Allocations is null || request.Allocations.Count is 0 or > MaximumAllocations)
+        if (request.Allocations is null || request.Allocations.Count > MaximumAllocations)
             throw new FinancePostingValidationException(
-                $"A payment requires between 1 and {MaximumAllocations} allocations in this slice.");
+                $"A payment carries at most {MaximumAllocations} allocations.");
+        if (request.PaymentType == PaymentEntryType.InternalTransfer)
+        {
+            if (request.Allocations.Count > 0)
+                throw new FinancePostingValidationException("Internal transfers carry no allocations.");
+        }
+        else if (!request.IsAdvance && request.Allocations.Count == 0)
+        {
+            throw new FinancePostingValidationException(
+                "A payment requires at least one allocation, or post it with isAdvance=true.");
+        }
         foreach (var allocation in request.Allocations)
         {
             if (allocation is null || allocation.PurchaseInvoiceId <= 0 || allocation.Amount <= 0)

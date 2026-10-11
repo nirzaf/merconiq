@@ -1874,6 +1874,8 @@ public class InventoryDbContext : IdentityDbContext<ApplicationUser>
                 .IsUnique()
                 .HasDatabaseName("UX_PaymentEntries_RequestKey");
             entity.HasIndex(payment => new { payment.TenantId, payment.CompanyId, payment.PostingDate });
+            entity.Property(payment => payment.FromAccountId).HasColumnType("integer");
+            entity.Property(payment => payment.ToAccountId).HasColumnType("integer");
             entity.HasOne(payment => payment.Supplier)
                 .WithMany()
                 .HasForeignKey(payment => payment.SupplierId)

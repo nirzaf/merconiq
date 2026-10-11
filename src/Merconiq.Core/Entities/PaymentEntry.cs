@@ -46,5 +46,14 @@ public sealed class PaymentEntry : AuditableEntity
 
     public string PostedBy { get; set; } = string.Empty;
 
+    /// <summary>Unallocated money settled against the party; reduces their open balance.</summary>
+    public bool IsAdvance { get; set; }
+
+    /// <summary>Internal transfers only: the account money leaves.</summary>
+    public int? FromAccountId { get; set; }
+
+    /// <summary>Internal transfers only: the account money arrives in.</summary>
+    public int? ToAccountId { get; set; }
+
     public ICollection<PaymentAllocation> Allocations { get; set; } = new List<PaymentAllocation>();
 }
