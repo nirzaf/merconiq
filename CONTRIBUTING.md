@@ -191,7 +191,7 @@ before a contributor starts:
 | --- | --- | --- |
 | Documentation link check | Add or improve a check that catches broken relative Markdown links without crawling external sites. | Run it against `README.md` and `docs/`. |
 | Webhook validation regression | Add a local, non-networking test for one documented unsafe URL case in `WebhookUrlValidator`. | Run the focused webhook validator tests. |
-| Forecasting documentation | Correct a source mismatch in the forecasting guide while preserving the managed-moving-average default and SSA opt-in wording. | Compare the guide with `docs/FORECASTING_RUNTIME.md` and run Markdown checks. |
+| Forecasting documentation | Correct a source mismatch in the forecasting guide while preserving the managed-moving-average default and SSA opt-in wording. | Compare the guide with `docs/FORECASTING.md` and run Markdown checks. |
 
 For clarification, comment on the issue with the exact command, source commit, and
 the smallest unanswered question. Maintainers may be unavailable; this repository

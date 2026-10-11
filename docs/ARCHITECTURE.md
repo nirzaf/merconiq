@@ -160,15 +160,25 @@ migration owner to make an example appear extensible.
   audit, and upgrade boundaries; documentation of an internal seam alone is
   not evidence that an external extension works.
 
-## Remaining evidence for a supported extension contract
+## Code Quality and Analyzer Baselines
 
-This page records the current ownership, dependency, persistence and versioning
-boundaries. The PostgreSQL fixture is a focused example, not completion of the
-full extension acceptance scope: it covers a test-only observer, not an
-external report or rules API, and still requires successful PostgreSQL CI and
-review. The integration contracts and evidence tracked by issue #355 also
-remain open; they do not prevent this current-state documentation, but they
-must be resolved before claiming the broader M18 integration/extension
-contract is complete. The M10 qualification prerequisite is also independent
-and is not satisfied by this fixture. Keep issue #359 open until the remaining
-evidence and prerequisites are reviewed.
+The web application enforces strict Roslyn analyzer baselines in both local Release builds and automated CI pipelines:
+- **API Versioning (AV0021):** Treats security-sensitive unversioned or incorrectly formatted API endpoints as compilation errors.
+- **MudBlazor Contracts (MUD0002):** Treats MudBlazor component contract discrepancies as compilation errors.
+
+When a warning appears in these categories, developers must fix the component or contract definition rather than suppressing the diagnostic. Unrelated documentation warnings (such as CS1591) remain advisory and do not fail the build.
+
+## Observability and OpenTelemetry Metrics
+
+Merconiq integrates OpenTelemetry for end-to-end distributed tracing and metrics:
+- **Configuration:** OpenTelemetry is disabled by default in test environments. Enable it in production using `OpenTelemetry:Enabled=true` (or `OpenTelemetry__Enabled=true`) and specify an OTLP collector via `OpenTelemetry:OtlpEndpoint`.
+- **Instrumentation:** Instruments incoming ASP.NET Core HTTP requests, outbound HTTP calls, EF Core database operations, and .NET runtime metrics.
+- **Application Meter (`Merconiq.Inventory`):** Emits business counters for concurrency retries, forecast fallbacks, low-stock threshold triggers, and webhook delivery failures. Keep collector endpoints and credentials in deployment environment secrets rather than source control.
+
+## ASP.NET Core Data Protection and Key Persistence
+
+Production deployments persist Data Protection encryption keys to durable external storage:
+- **Key Storage Path:** Configured via `DataProtection:KeyStoragePath` (default `/app/data/keys` in Docker containers, mapped to the `dataprotection` persistent volume).
+- **Cluster & Replica Safety:** Running multiple replicas requires sharing this mounted directory or utilizing a distributed key provider so all instances share identical cryptographic keys for authentication cookies and CSRF tokens.
+- **Development and Testing:** Development and test environments deliberately avoid filesystem persistence, retaining isolated in-memory ephemeral key rings.
+

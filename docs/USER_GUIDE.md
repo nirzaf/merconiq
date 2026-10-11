@@ -300,7 +300,7 @@ in the production multi-architecture Docker image. It is deterministic and has n
 runtime dependency. ML.NET SSA is available only as an explicit deployment choice with
 `Forecasting__Implementation=ssa`; if its native dependencies are missing, the request
 fails and is logged instead of silently changing models. See
-[`docs/FORECASTING_RUNTIME.md`](FORECASTING_RUNTIME.md) for deployment details.
+[`docs/FORECASTING.md`](FORECASTING.md) for deployment details.
 
 These are exposed as a **headless API** (and the system pre-trains its models in the background every few hours). If your administrator has enabled them, you can ask for forecasts and anomaly reports via the API. Swagger documentation is available at `/swagger` in the development environment.
 

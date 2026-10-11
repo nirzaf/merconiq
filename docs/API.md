@@ -378,7 +378,7 @@ returned supplier's `externalId` when more rows remain, otherwise `null`.
 Forecast endpoints return `400 Bad Request` if the requested horizon, matching
 historical sell-row count, or all-item catalog size exceeds its configured limit.
 Over-limit forecasts are rejected, never silently truncated; see
-[`FORECASTING_RUNTIME.md`](FORECASTING_RUNTIME.md) for defaults and supported
+[`FORECASTING.md`](FORECASTING.md) for defaults and supported
 configuration ceilings.
 
 Opening baseline endpoints accept an explicit-cost CSV with the header

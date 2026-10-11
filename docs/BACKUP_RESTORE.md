@@ -69,6 +69,22 @@ The restored application must be able to authenticate only after the documented
 data-protection keys and administrator configuration are supplied. A restored
 database alone is not evidence that old cookies or sessions remain valid.
 
+## Backing up and restoring Data Protection keys
+
+The ASP.NET Core Data Protection key ring protects authentication cookies and anti-forgery tokens:
+- **Location:** Mounted at `/app/data/keys` from the `dataprotection` volume in Docker Compose.
+- **Backup Command:**
+  ```bash
+  docker run --rm -v merconiq_dataprotection:/keys -v "$BACKUP_DIR:/backup" alpine \
+    tar -czf /backup/dataprotection_keys.tar.gz -C /keys .
+  ```
+- **Restore Command:**
+  ```bash
+  docker run --rm -v merconiq_dataprotection:/keys -v "$BACKUP_DIR:/backup" alpine \
+    tar -xzf /backup/dataprotection_keys.tar.gz -C /keys
+  ```
+- **Security & Permissions:** Key files contain cryptographic master keys; protect backups with AES-256 encryption or secure vault storage. The key directory must be writable only by the application identity (permissions `0700`).
+
 ## Cleanup and verification record
 
 After all assertions are captured, remove only the named disposable database and
@@ -84,3 +100,4 @@ measured, and any failure. This repository does not claim a recovery time or a
 successful backup/restore verification until those fields contain real operator
 evidence. In environments without PostgreSQL client tools and an isolated target,
 leave the verification status as `not run` rather than substituting a health check.
+

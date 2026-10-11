@@ -11,7 +11,7 @@ Merconiq is an open-source business management platform built with .NET and Post
 
 ## Documentation
 
-- **[Documentation source and cutover status](docs/REPOSITORY_CUTOVER.md)** — the selected canonical documentation URL is [GitHub Pages](https://nirzaf.github.io/merconiq/); see the guide for the latest deployment and verification status.
+- **[Documentation Portal](docs/index.md)** — the canonical documentation site on [GitHub Pages](https://nirzaf.github.io/merconiq/).
 - **[User Guide](docs/USER_GUIDE.md)** — for the people who will *use* the application day-to-day (login, items, stock operations, purchase orders, troubleshooting).
 - **README.md** (this file) — for developers and operators: installation, architecture, API, deployment.
 
@@ -303,7 +303,7 @@ To exercise either workflow without publication, use its manual `dry_run` input.
 
 ### GitHub Pages
 
-The Pages workflow builds the Markdown files in `docs/` into a rendered Jekyll site and deploys `_site` when documentation changes reach `master`. On a fork, enable **Settings → Pages → Source: GitHub Actions** and configure that fork's own base path. The canonical project URL is `https://nirzaf.github.io/merconiq/`; the [cutover guide](docs/REPOSITORY_CUTOVER.md) records the last live verification, including post-deployment checks.
+The Pages workflow builds the Markdown files in `docs/` into a rendered Jekyll site and deploys `_site` when documentation changes reach `master`. On a fork, enable **Settings → Pages → Source: GitHub Actions** and configure that fork's own base path. The canonical project URL is `https://nirzaf.github.io/merconiq/`; see the [Documentation Portal](docs/index.md) for guides and live verification.
 
 ### Coverage
 

@@ -31,3 +31,13 @@ exit code.
 Any accepted exception must be documented in the pull request with its
 affected package, reason, and a follow-up owner or remediation date; broad
 suppressions are not permitted.
+
+## HTTP Security Headers and Reverse Proxy Trust
+
+The application emits defense-in-depth HTTP security headers on all responses:
+- **Content-Security-Policy (CSP):** Restricts asset sources to same-origin resources, inline styles and scripts required by the MudBlazor server rendering model, and WebSocket endpoints for interactive Blazor circuits.
+- **X-Frame-Options & Anti-Clickjacking:** Configured to deny unauthorized framing of the application interface.
+- **X-Content-Type-Options:** Enforced with `nosniff` to prevent MIME-type confusion attacks.
+- **Strict-Transport-Security (HSTS):** Enforced on all production HTTPS requests with preload directives.
+- **Reverse Proxy and Forwarded Headers:** Forwarded proxy headers (`X-Forwarded-For`, `X-Forwarded-Proto`) are processed strictly from addresses explicitly defined in `Security:TrustedProxies` and `Security:TrustedNetworks`. An empty configuration deliberately rejects untrusted upstream forwarded headers.
+

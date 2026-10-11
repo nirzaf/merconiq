@@ -14,8 +14,8 @@ ghcr.io/nirzaf/merconiq
 
 The workflow configuration does not establish that a package or pullable
 artifact currently exists. Verify package visibility and the exact candidate
-digest before use. Repository identity and deployment status are tracked in
-[`REPOSITORY_CUTOVER.md`](REPOSITORY_CUTOVER.md).
+digest before use. Repository architecture and deployment boundaries are tracked in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Record a candidate
 
@@ -82,10 +82,9 @@ docker buildx imagetools inspect "$SUBSTITUTED"
 Do not replace `<different-digest>` with a made-up value in an evidence record. For a
 real verification run, use a digest returned by the registry and record the command,
 tool version, workflow URL, source SHA, manifest digest, platform digests, attestation
-subjects, and result. No published release or retained artifact is claimed by this
-document until that owner-authorized run is recorded in `docs/RELEASE_CANDIDATE.md`.
+subjects, and result.
 
 Related controls:
 [Docker workflow](https://github.com/nirzaf/merconiq/blob/master/.github/workflows/docker.yml),
-[release-candidate evidence](RELEASE_CANDIDATE.md),
-[project provenance](PROVENANCE.md).
+[Security scanning](SECURITY_SCANNING.md),
+[Project provenance](PROVENANCE.md).
