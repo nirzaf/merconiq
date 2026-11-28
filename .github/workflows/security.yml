@@ -75,7 +75,7 @@ jobs:
 
       - name: Upload Trivy results
         if: always()
-        uses: github/codeql-action/upload-sarif@311b4ee155dcdab395044f00946f664bd51ff173 # v4
+        uses: github/codeql-action/upload-sarif@fbfa9f37476c0024508d051f3c34fcca3366b0e2 # v4
         with:
           sarif_file: trivy-results.sarif
           category: trivy-container
